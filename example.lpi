@@ -26,7 +26,7 @@
       <FormatVersion Value="2"/>
       <Modes Count="0"/>
     </RunParams>
-    <Units Count="2">
+    <Units Count="3">
       <Unit0>
         <Filename Value="example.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -36,6 +36,10 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="WebSocket"/>
       </Unit1>
+      <Unit2>
+        <Filename Value="utilities.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit2>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -5,63 +5,86 @@ unit WebSocket;
 interface
 
 uses
-  Classes, SysUtils, ssockets, gvector, fgl;
+  Classes, SysUtils, ssockets, fgl, sha1, base64, utilities;
 
 type
+  { TRequestHeaders }
 
-  { TObjectPool }
+  TRequestHeaders = class(specialize TFPGMap<string, string>)
+  public
+    procedure Parse(const HeaderString: string);
+    constructor Create;
+  end;
 
-  generic TObjectPool<T, Factory, Checker> = class
+  TRequestData = record
+    Host: string;
+    Path: string;
+    Key: string;
+    Headers: TRequestHeaders;
+  end;
+
+  { TWebsocketHandler }
+
+  TWebsocketHandler = class
+  public
+    function Accept(const ARequest: TRequestData;
+      const ResponseHeaders: TStrings): boolean;
+  end;
+
+  { THostHandler }
+
+  THostHandler = class(specialize TStringObjectMap<TWebsocketHandler>)
   private
-    type
-    TPool = class(specialize TVector<T>);
-  private
-    FWorking: TPool;
-    FIdle: TPool;
-    procedure CleanUp;
+    FHost: string;
+
+  public
+    constructor Create(const AHost: string; FreeObjects: boolean);
+
+    property Host: string read FHost;
+  end;
+
+  { THostMap }
+
+  THostMap = class(specialize TStringObjectMap<THostHandler>)
   public
     constructor Create;
-    destructor Destroy; override;
+    procedure AddHost(const AHost: THostHandler);
+  end;
 
-    function GetObject: T;
+  { TLockedHostMap }
+
+  TLockedHostMap = class(specialize TThreadedObject<THostMap>)
+  public
+    constructor Create;
   end;
 
   { TAcceptingThread }
 
-  TAcceptingThread = class(TThread)
-  public
-    class function Produce: TAcceptingThread;
-    class procedure Clear(const AThread: TAcceptingThread);
-    class procedure DoDestroy(const AThread: TAcceptingThread);
-    class function IsIdle(const AThread: TAcceptingThread): boolean;
+  TAcceptingThread = class(TPoolableThread)
   private
-    FFree: boolean;
-    FDoHandleConnection: TConnectEvent;
     FStream: TSocketStream;
+    FHostMap: TLockedHostMap;
+    function ReadRequest(var RequestData: TRequestData): boolean;
+    function GenerateAcceptingKey(const Key: string): string;
   protected
-    procedure Execute; override;
-  public
-    property isFree: boolean read FFree;
-    property DoHandleConnection: TConnectEvent
-      read FDoHandleConnection write FDoHandleConnection;
+    procedure DoExecute; override;
     property Stream: TSocketStream read FStream write FStream;
+    property HostMap: TLockedHostMap read FHostMap write FHostMap;
   end;
 
-  TAcceptingThreadPool = class(specialize TObjectPool<TAcceptingThread,
-    TAcceptingThread, TAcceptingThread>);
+  TAcceptingThreadFactory = specialize TPoolableThreadFactory<TAcceptingThread>;
 
-  TAcceptingMethod = (amSingle, amThreaded, amThreadPool);
+  TAcceptingThreadPool = specialize TObjectPool<TAcceptingThread,
+    TAcceptingThreadFactory, TAcceptingThreadFactory>;
 
   { TWebSocketServer }
 
   TWebSocketServer = class
   private
-    FAcceptingMethod: TAcceptingMethod;
-    FThreadPool: TAcceptingThreadPool;
     FSocket: TInetServer;
+    FHostMap: TLockedHostMap;
 
     procedure DoCreate;
-    procedure DoHandleConnection(Sender: TObject; Data: TSocketStream);
     procedure HandleConnect(Sender: TObject; Data: TSocketStream);
   public
     procedure Start;
@@ -71,30 +94,18 @@ type
     constructor Create(const AHost: string; const APort: word;
       AHandler: TSocketHandler);
     constructor Create(const APort: word);
-    property AcceptingMethod: TAcceptingMethod
-      read FAcceptingMethod write FAcceptingMethod;
     property Socket: TInetServer read FSocket;
   end;
 
-  { TStreamHelper }
+const
+  MalformedRequestMessage = 'HTTP/1.1 400 Bad Request'#13#10#13#10;
+  ForbiddenRequestMessage = 'HTTP/1.1 403 Forbidden'#13#10#13#10;
+  HandlerNotFoundMessage = 'HTTP/1.1 404 Not Found'#13#10#13#10;
 
-  TStreamHelper = class helper for TStream
-  public
-    procedure ReadTo(const pattern: string; out Result: string; MaxLen: integer = 1024);
-    function WriteRaw(const Data: string): longint;
-  end;
+var
+  AcceptingThreadPool: TAcceptingThreadPool;
 
 implementation
-
-type
-
-  { TRequestHeaders }
-
-  TRequestHeaders = class(specialize TFPGMap<string, string>)
-  public
-    procedure Parse(const HeaderString: string);
-    constructor Create;
-  end;
 
 { TRequestHeaders }
 
@@ -102,6 +113,41 @@ function DoHeaderKeyCompare(const Key1, Key2: string): integer;
 begin
   // Headers are case insensetive
   Result := CompareStr(Key1.ToLower, Key2.ToLower);
+end;
+
+{ THostHandler }
+
+constructor THostHandler.Create(const AHost: string; FreeObjects: boolean);
+begin
+  FHost := AHost;
+  inherited Create(FreeObjects);
+end;
+
+{ TWebsocketHandler }
+
+function TWebsocketHandler.Accept(const ARequest: TRequestData;
+  const ResponseHeaders: TStrings): boolean;
+begin
+  Result := True;
+end;
+
+{ THostMap }
+
+constructor THostMap.Create;
+begin
+  inherited Create(True);
+end;
+
+procedure THostMap.AddHost(const AHost: THostHandler);
+begin
+  Objects[AHost.FHost] := AHost;
+end;
+
+{ TLockedHostMap }
+
+constructor TLockedHostMap.Create;
+begin
+  inherited Create(THostMap.Create);
 end;
 
 procedure TRequestHeaders.Parse(const HeaderString: string);
@@ -134,193 +180,169 @@ begin
   Self.Sorted := True;
 end;
 
-{ TStreamHelper }
-
-{* -----------------------------------------------------------------------------
- * Reads a stream until a pattern is found, maxlen is reached or an exception
- * is thrown.
- * On exception the result will still be a valid string. Can be used to read
- * until End of Stream
- * ----------------------------------------------------------------------------}
-procedure TStreamHelper.ReadTo(const pattern: string; out Result: string;
-  MaxLen: integer);
-var
-  c: char;
-  len: integer;
-  pLen: integer;
-  backtrack: integer;
-begin
-  SetLength(Result, 128);
-  len := 0;
-  plen := 0;
-  backtrack := 0;
-  try
-    while len < MaxLen do
-    begin
-      c := char(Self.ReadByte);
-      Result[len + 1] := c;
-      Inc(len);
-      if len = Result.Length then
-        SetLength(Result, Result.Length * 2);
-      if pattern[pLen + 1] = c then
-      begin
-        if plen = 0 then
-        begin
-          backtrack := len;
-        end;
-        Inc(pLen);
-        if pLen = pattern.Length then
-          Break;
-      end
-      else if plen > 0 then
-      begin
-        pLen := 0;
-        while backtrack + pLen < len do
-        begin
-          if pattern[pLen] = Result[backtrack + pLen] then
-            Inc(pLen)
-          else
-          begin
-            pLen := 0;
-            Inc(backtrack);
-          end;
-        end;
-      end;
-    end;
-  finally
-    SetLength(Result, len);
-  end;
-end;
-
-{* -----------------------------------------------------------------------------
- * HTTP writes plaintext, so this is a wrapper for .Write for ommiting the
- * Count parameter
- * ----------------------------------------------------------------------------}
-function TStreamHelper.WriteRaw(const Data: string): longint;
-begin
-  Result := self.Write(Data[1], Data.Length);
-end;
-
 { TAcceptingThread }
 
-class function TAcceptingThread.Produce: TAcceptingThread;
-begin
-  Result := TAcceptingThread.Create(True);
-end;
-
-class procedure TAcceptingThread.Clear(const AThread: TAcceptingThread);
-begin
-  AThread.FFree := False;
-end;
-
-class procedure TAcceptingThread.DoDestroy(const AThread: TAcceptingThread);
-begin
-  AThread.Free;
-end;
-
-class function TAcceptingThread.isIdle(const AThread: TAcceptingThread): boolean;
-begin
-  Result := AThread.Finished and AThread.isFree;
-end;
-
-procedure TAcceptingThread.Execute;
-begin
-  FFree := True;
-  if Assigned(DoHandleConnection) then
-    DoHandleConnection(self, FStream);
-end;
-
-{ TObjectPool }
-{* -----------------------------------------------------------------------------
- * Searches the whole list, checks if some of the objects can be transfered from
- * working to idle
- * ----------------------------------------------------------------------------}
-procedure TObjectPool.CleanUp;
+function TAcceptingThread.ReadRequest(var RequestData: TRequestData): boolean;
 var
-  i: SizeUInt;
-  len: SizeUInt;
+  method: string;
+  proto: string;
+  headerstr: string;
+  upg: string;
+  conn: string;
+  key: string;
+  version: string;
 begin
-  i := 0;
-  len := FWorking.Size;
-  while i < len do
+  Result := False;
+  // Check if this is HTTP by checking the first line
+  // Method GET is required
+  SetLength(method, 4);
+  Stream.Read(method[1], 4);
+  if method <> 'GET ' then
   begin
-    if Checker.isIdle(FWorking[i]) then
-    begin
-      // If idle than put into idle list
-      FIdle.PushBack(FWorking[i]);
-      // swap delete, so in the end we only need to reduce the size
-      FWorking[i] := FWorking[len - 1];
-      Dec(len);
-    end
-    else
-    begin
-      Inc(i);
+    // Not GET
+    Exit;
+  end;
+  // Read path and HTTP version
+  Stream.ReadTo(' ', RequestData.Path);
+  Stream.ReadTo(#13#10, proto, 10);
+  RequestData.Path := RequestData.Path.TrimRight;
+  proto := proto.TrimRight.ToLower;
+  if not proto.StartsWith('http/') then
+  begin
+    // Only accept http/1.1
+    Exit;
+  end;
+  if not proto.EndsWith('1.1') then
+  begin
+    // non 1.1 version: return forbidden
+    Exit;
+  end;
+  // Headers are separated by 2 newlines (CR+LF)
+  Stream.ReadTo(#13#10#13#10, headerstr, 2048);
+  RequestData.Headers.Parse(headerstr);
+  if not (RequestData.Headers.TryGetData('Upgrade', upg) and
+    RequestData.Headers.TryGetData('Connection', conn) and
+    RequestData.Headers.TryGetData('Sec-WebSocket-Key', Key) and
+    (upg = 'websocket') and (conn = 'Upgrade')) then
+  begin
+    // Seems to be a normal HTTP request, we only handle websockets
+    Exit;
+  end;
+  // How to handle this?
+  if not RequestData.Headers.TryGetData('Sec-WebSocket-Version', version) then
+    version := '';
+  if not RequestData.Headers.TryGetData('Host', RequestData.Host) then
+    RequestData.Host := '';
+  Result := True;
+end;
+
+function TAcceptingThread.GenerateAcceptingKey(const Key: string): string;
+var
+  concatKey: string;
+  keyHash: TSHA1Digest;
+  OutputStream: TStringStream;
+  b64Encoder: TBase64EncodingStream;
+const
+  WebsocketMagicString = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+begin
+  // Key = Base64(SHA1(Key + MagicString))
+  concatKey := Key + WebsocketMagicString;
+  keyHash := SHA1String(concatKey);
+  OutputStream := TStringStream.Create('');
+  try
+    b64Encoder := TBase64EncodingStream.Create(OutputStream);
+    try
+      b64Encoder.Write(keyHash[low(keyHash)], Length(keyHash));
+      Result := OutputStream.DataString;
+    finally
+      b64Encoder.Free;
     end;
+  finally
+    OutputStream.Free;
   end;
-  // "Remove" the deleted objects
-  FWorking.Resize(len);
-  (* Maybe this is usefull?
-  if FIdle.Size > FWorking.Size + 1 then
-  begin
-    for i := FWorking.Size + 1 to FIdle.Size - 1 do
-      Factory.DoDestroy(FIdle[i]);
-    FIdle.Resize(FWorking.Size + 1);
-  end;
-  *)
 end;
 
-constructor TObjectPool.Create;
-begin
-  FWorking := TPool.Create;
-  FIdle := TPool.Create;
-end;
-
-destructor TObjectPool.Destroy;
+procedure TAcceptingThread.DoExecute;
 var
-  obj: T;
+  RequestData: TRequestData;
+  hm: THostMap;
+  hh: THostHandler;
+  sh: TWebsocketHandler;
+  ResponseHeaders: TStringList;
+  i: integer;
+  HandsakeResponse: TStringList;
 begin
-  for obj in FWorking do
-    Factory.DoDestroy(obj);
-  FWorking.Free;
-  for obj in FIdle do
-    Factory.DoDestroy(obj);
-  FIdle.Free;
-  inherited Destroy;
-end;
+  RequestData.Headers := TRequestHeaders.Create;
+  try
+    // Reqding request
+    try
+      if not ReadRequest(RequestData) then
+      begin
+        Stream.WriteRaw(MalformedRequestMessage);
+        Stream.Free;
+        Exit;
+      end;
+    except
+      on E: EReadError do
+      begin
+        Stream.WriteRaw(MalformedRequestMessage);
+        Stream.Free;
+        Exit;
+      end;
+    end;
+    // Getting responsible handler
+    hm := FHostMap.Lock;
+    try
+      hh := hm.Objects[RequestData.Host];
+      if not Assigned(hh) then
+      begin
+        Stream.WriteRaw(HandlerNotFoundMessage);
+        Stream.Free;
+        Exit;
+      end;
+      sh := hh.Objects[RequestData.Path];
+      if not Assigned(sh) then
+      begin
+        Stream.WriteRaw(HandlerNotFoundMessage);
+        Stream.Free;
+        Exit;
+      end;
+    finally
+      FHostMap.Unlock;
+    end;
+    // Checking if handler wants to accept
+    ResponseHeaders := TStringList.Create;
+    try
+      ResponseHeaders.NameValueSeparator := ':';
+      if not sh.Accept(RequestData, ResponseHeaders) then
+      begin
+        Stream.WriteRaw(ForbiddenRequestMessage);
+        Stream.Free;
+        Exit;
+      end;
+      // Neseccary headers
+      ResponseHeaders.Values['Connection'] := 'Upgrade';
+      ResponseHeaders.Values['Upgrade'] := 'websocket';
+      ResponseHeaders.Values['Sec-WebSocket-Accept'] :=
+        GenerateAcceptingKey(RequestData.Key);
+      // Generating response
+      HandsakeResponse := TStringList.Create;
+      try
+        HandsakeResponse.TextLineBreakStyle := tlbsCRLF;
+        HandsakeResponse.Add('HTTP/1.1 101 Switching Protocols');
+        for i := 0 to ResponseHeaders.Count - 1 do
+          HandsakeResponse.Add('%s: %s'.Format([ResponseHeaders.Names[i],
+            ResponseHeaders.ValueFromIndex[i]]));
 
-{* -----------------------------------------------------------------------------
- * Returns an object. If Idle ones are available they are reused, otherwise
- * new ones will be created
- * ----------------------------------------------------------------------------}
-function TObjectPool.GetObject: T;
-var
-  i: SizeUInt;
-begin
-  CleanUp;
-  // If we have objects cached return one of them
-  if FIdle.Size > 0 then
-  begin
-    Result := FIdle.Back;
-    FIdle.PopBack;
-    Factory.Clear(Result);
-    FWorking.PushBack(Result);
-  end
-  // if this isn't the first object, create as many idle ones as there are working ones
-  else if FWorking.Size > 0 then
-  begin
-    FIdle.Reserve(FWorking.Size);
-    for i := 0 to FWorking.Size do
-      FIdle.PushBack(Factory.Produce);
-    Result := FIdle.Back;
-    FIdle.PopBack;
-    Factory.Clear(Result);
-    FWorking.PushBack(Result);
-  end
-  else // otherwise create only one
-  begin
-    Result := Factory.Produce;
-    Factory.Clear(Result);
-    FWorking.PushBack(Result);
+        Stream.WriteRaw(HandsakeResponse.Text);
+      finally
+        HandsakeResponse.Free;
+      end;
+    finally
+      ResponseHeaders.Free;
+    end;
+  finally
+    RequestData.Headers.Free;
   end;
 end;
 
@@ -328,123 +350,18 @@ end;
 
 procedure TWebSocketServer.DoCreate;
 begin
-  FAcceptingMethod := amSingle;
-  FThreadPool := TAcceptingThreadPool.Create;
   FSocket.OnConnect := @HandleConnect;
-end;
-
-procedure TWebSocketServer.DoHandleConnection(Sender: TObject; Data: TSocketStream);
-var
-  method: string;
-  path: string;
-  proto: string;
-  headerstr: string;
-  Headers: TRequestHeaders;
-  upg: string;
-  conn: string;
-  key: string;
-  version: string;
-const
-  MalformedRequestReturn = 'HTTP/1.1 403 Forbidden'#13#10#13#10;
-begin
-  // Check if this is HTTP by checking the first line
-  try
-    // Method GET is required
-    Data.ReadTo('GET ', method, 4);
-  except // Not HTTP: kill socket
-    on E: EReadError do
-    begin
-      Data.Free;
-      Exit;
-    end;
-  end;
-  method := method.TrimRight;
-  if method.Length <> 3 then // Not GET: kill socket
-  begin
-    Data.Free;
-    Exit;
-  end;
-  try  // Read path and HTTP version
-    Data.ReadTo(' ', path);
-    Data.ReadTo(#13#10, proto);
-  except
-    on E: EReadError do // Malformed or unexpected error: Kill stream
-    begin
-      Data.Free;
-      Exit;
-    end;
-  end;
-  path := path.TrimRight;
-  proto := proto.TrimRight.ToLower;
-  if not proto.StartsWith('http/') then // Only accept http/1.1
-  begin
-    Data.Free;
-    Exit;
-  end;
-  if not proto.EndsWith('1.1') then
-  begin // non 1.1 version: return forbidden
-    Data.WriteRaw(MalformedRequestReturn);
-    Data.Free;
-    exit;
-  end;
-  // Headers are separated by 2 newlines (CR+LF)
-  try
-    Data.ReadTo(#13#10#13#10, headerstr, 2048);
-  except
-    on E: EReadError do
-    begin
-      Data.Free;
-      Exit;
-    end;
-  end;
-  Headers := TRequestHeaders.Create;
-  try
-    // Check required headers for handshake
-    Headers.Parse(headerstr);
-    if not (headers.TryGetData('Upgrade', upg)
-        and Headers.TryGetData('Connection', conn)
-        and Headers.TryGetData('Sec-WebSocket-Key', key)
-        and (upg = 'websocket')
-        and (conn = 'Upgrade')) then
-    begin
-      Data.WriteRaw(MalformedRequestReturn);
-      Data.Free;
-      exit;
-    end;
-    // How to handle this?
-    if not Headers.TryGetData('Sec-WebSocket-Version', version) then
-      version := '';
-  finally
-    Headers.Free;
-  end;
-  // TODO: perform handshake
+  FHostMap := TLockedHostMap.Create;
 end;
 
 procedure TWebSocketServer.HandleConnect(Sender: TObject; Data: TSocketStream);
 var
-  at: TAcceptingThread;
+  acceptingThread: TAcceptingThread;
 begin
-  // We take the extra step of adding a function DoHandleConnection, so we have
-  // a common interface for threaded and not threaded usage
-  case FAcceptingMethod of
-    amSingle:
-      DoHandleConnection(Sender, Data);
-    amThreaded:
-    begin
-      at := TAcceptingThread.Produce;
-      at.FreeOnTerminate := True;
-      at.Stream := Data;
-      at.DoHandleConnection := @DoHandleConnection;
-      at.Start;
-    end;
-    amThreadPool:
-    begin
-      at := FThreadPool.GetObject;
-      at.Stream := Data;
-      at.DoHandleConnection := @DoHandleConnection;
-      at.Start;
-    end;
-  end;
+  acceptingThread := AcceptingThreadPool.GetObject;
+  acceptingThread.Stream := Data;
+  acceptingThread.HostMap := FHostMap;
+  acceptingThread.Restart;
 end;
 
 procedure TWebSocketServer.Start;
@@ -461,7 +378,7 @@ destructor TWebSocketServer.Destroy;
 begin
   Stop(True);
   FSocket.Free;
-  FThreadPool.Free;
+  FHostMap.Free;
   inherited Destroy;
 end;
 
@@ -477,5 +394,11 @@ begin
   FSocket := TInetServer.Create(APort);
   DoCreate;
 end;
+
+initialization
+  AcceptingThreadPool := TAcceptingThreadPool.Create;
+
+finalization
+  AcceptingThreadPool.Free;
 
 end.

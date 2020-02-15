@@ -6,7 +6,7 @@ uses
   {$IFDEF UNIX}{$IFDEF UseCThreads}
   cthreads,
   {$ENDIF}{$ENDIF}
-  Classes, sysutils, WebSocket
+  Classes, sysutils, WebSocket, utilities
   { you can add units after this };
 
 
