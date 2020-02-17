@@ -24,7 +24,7 @@ type
   end;
 
   // Represent opcodes
-  TWebsocketMessageType = (wmtContinue = 0, wmtString = 8, wmtBinary = 2);
+  TWebsocketMessageType = (wmtContinue = 0, wmtString = 1, wmtBinary = 2);
 
   { TWebsocketMessage }
 
@@ -40,10 +40,10 @@ type
 
   TWebsocketStringMessage = class(TWebsocketMessage)
   private
-    FData: UnicodeString;
+    FData: UTF8String;
   public
-    constructor Create(const AData: UnicodeString);
-    property Data: UnicodeString read FData;
+    constructor Create(const AData: UTF8String);
+    property Data: UTF8String read FData;
   end;
 
   { TWebsocketBinaryMessage }
@@ -52,7 +52,7 @@ type
   private
     FData: TBytes;
   public
-    constructor Create(const AData: TBytes);  
+    constructor Create(const AData: TBytes);
     property Data: TBytes read FData;
   end;
 
@@ -91,17 +91,26 @@ type
     FMessages: TLockedMessageList;
     FMaskMessages: boolean;
     FAssumeMaskedMessages: boolean;
+    FOnRecieveMessage: TNotifyEvent;
+    FOnClose: TNotifyEvent;
+    FOpen: boolean;
     function GenerateMask: integer;
   public
     constructor Create(AStream: TSocketStream; AMaskMessage: boolean;
       AssumeMaskedMessages: boolean);
     destructor Destroy; override;
 
+    procedure Close(ForceClose: boolean = False);
     procedure RecieveMessages;
     function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
       MaxFrameLength: int64 = 125): TWebsocketMessageStream;
 
     function GetUnprocessedMessages(const MsgList: TMessageOwnerList): integer;
+    property Open: boolean read FOpen;
+    property OnRecieveMessage: TNotifyEvent read FOnRecieveMessage
+      write FOnRecieveMessage;
+    property OnClose: TNotifyEvent read FOnClose write FOnClose;
+    property SocketStream: TSocketStream read FStream;
   end;
 
   { TWebsocketHandler }
@@ -111,8 +120,14 @@ type
     function Accept(const ARequest: TRequestData;
       const ResponseHeaders: TStrings): boolean; virtual;
     procedure HandleCommunication(ACommunicator: TWebsocketCommunincator); virtual;
+  end;
+
+  TThreadedWebsocketHandler = class(TWebsocketHandler)
+  public
+    procedure HandleCommunication(ACommunicator: TWebsocketCommunincator); override;
     procedure DoHandleCommunication(ACommunication: TWebsocketCommunincator); virtual;
   end;
+
 
   { THostHandler }
 
@@ -178,18 +193,51 @@ implementation
 
 type
   { Protocol specific types }
-  TWebsocketFrameHeader = bitpacked record
+  TWebsocketFrameHeader = record
     Fin: boolean;
-    Reserved: 0..7;
-    OPCode: 0..15;
+    OPCode: TWebsocketMessageType;
     Mask: boolean;
-    PayloadLen: 0..127;
+    PayloadLen: byte;
   end;
   TMaskRec = record
     case boolean of
       True: (Bytes: array[0..3] of byte);
       False: (Key: integer);
   end;
+  TWordRec = record
+    case boolean of
+      True: (Bytes: array[0..1] of byte);
+      False: (Value: word);
+  end;
+
+function WordToFrameHeader(Data: word): TWebsocketFrameHeader; inline;
+var
+  wordRec: TWordRec;
+begin
+  wordRec.Value := Data;
+  Result.Fin := (wordRec.Bytes[0] and 128) = 128;
+  Result.OPCode := TWebsocketMessageType(wordRec.Bytes[0] and %1111);
+  Result.Mask := (wordRec.Bytes[1] and 128) = 128;
+  Result.PayloadLen := wordRec.Bytes[1] and %1111111;
+end;
+
+function boolToBit(b: boolean; Bit: byte): byte; inline;
+begin
+  Result := 0;
+  if b then
+    Result := 1 shl Bit;
+end;
+
+function FrameHEaderToWord(const Header: TWebsocketFrameHeader): word; inline;
+var
+  wordRec: TWordRec;
+begin
+  wordRec.Bytes[0] := boolToBit(Header.Fin, 7) or (Ord(Header.OPCode) and %1111);
+  wordRec.Bytes[1] := boolToBit(Header.Mask, 7) or (Header.PayloadLen and %1111111);
+  Result := wordRec.Value;
+end;
+
+type
 
   {Thread Types}
   { TWebsocketHandlerThread }
@@ -197,13 +245,13 @@ type
   TWebsocketHandlerThread = class(TPoolableThread)
   private
     FCommunicator: TWebsocketCommunincator;
-    FHandler: TWebsocketHandler;
+    FHandler: TThreadedWebsocketHandler;
   protected
     procedure DoExecute; override;
-    property Handler: TWebsocketHandler read FHandler write FHandler;
+    property Handler: TThreadedWebsocketHandler read FHandler write FHandler;
     property Communicator: TWebsocketCommunincator
       read FCommunicator write FCommunicator;
-  end; 
+  end;
 
   THandlerThreadFactory = specialize TPoolableThreadFactory<TWebsocketHandlerThread>;
   THandlerThreadPool = specialize TObjectPool<TWebsocketHandlerThread,
@@ -253,7 +301,8 @@ var
   HandlerThreadPool: TLockedHandlerThreadPool;
   AcceptingThreadPool: TLockedAcceptingThreadPool;
 
-function CreateAcceptingThread(const AStream: TSocketStream; const AHostMap: TLockedHostMap): TAcceptingThread;
+function CreateAcceptingThread(const AStream: TSocketStream;
+  const AHostMap: TLockedHostMap): TAcceptingThread;
 var
   pool: TAcceptingThreadPool;
 begin
@@ -268,7 +317,8 @@ begin
   end;
 end;
 
-function CreateHandlerThread(const ACommunicator: TWebsocketCommunincator; const AHandler: TWebsocketHandler): TWebsocketHandlerThread;
+function CreateHandlerThread(const ACommunicator: TWebsocketCommunincator;
+  const AHandler: TThreadedWebsocketHandler): TWebsocketHandlerThread;
 var
   pool: THandlerThreadPool;
 begin
@@ -283,7 +333,8 @@ begin
   end;
 end;
 
-function CreateRecieverThread(const ACommunicator: TWebsocketCommunincator): TWebsocketRecieverThread;
+function CreateRecieverThread(
+  const ACommunicator: TWebsocketCommunincator): TWebsocketRecieverThread;
 var
   pool: TRecieverThreadPool;
 begin
@@ -332,11 +383,12 @@ procedure TWebsocketHandlerThread.DoExecute;
 var
   Recv: TWebsocketRecieverThread;
 begin
-  Recv := CreateRecieverTHread(FCommunicator);
+  Recv := CreateRecieverThread(FCommunicator);
   try
     try
       FHandler.DoHandleCommunication(FCommunicator);
     finally
+      FCommunicator.Close;
       FCommunicator.Free;
     end;
   finally
@@ -349,7 +401,7 @@ end;
 procedure TWebsocketRecieverThread.DoExecute;
 begin
   FStopped := False;
-  while not Terminated and not FStopped do
+  while not Terminated and not FStopped and FCommunicator.Open do
   begin
     FCommunicator.RecieveMessages;
     Yield;
@@ -377,91 +429,122 @@ begin
   FMaskMessages := AMaskMessage;
   FAssumeMaskedMessages := AssumeMaskedMessages;
   FMessages := TLockedMessageList.Create(TMessageList.Create);
+  FOpen := True;
 end;
 
 destructor TWebsocketCommunincator.Destroy;
 begin
   // Ending communication => Close stream
-  FStream.Free;
+  Close(True);
   FMessages.Free;
   inherited Destroy;
+end;
+
+procedure TWebsocketCommunincator.Close(ForceClose: boolean);
+begin
+  if not FOpen then
+    Exit;
+  if not ForceClose then
+  begin
+    // TODO: send shutdown message
+  end;
+  if Assigned(FOnClose) then
+    FOnClose(Self);
+  FOpen := False;
+  FStream.Free;
 end;
 
 procedure TWebsocketCommunincator.RecieveMessages;
 var
   Header: TWebsocketFrameHeader;
-  len: Int64;
+  len: int64;
   MaskRec: TMaskRec;
   buffer: TBytes;
-  i: Int64;
+  i: int64;
   Message: TWebsocketMessage;
   outputStream: TMemoryStream;
   messageType: TWebsocketMessageType;
   lst: TMessageList;
-  str: AnsiString;
+  str: UTF8String;
 begin
   Message := nil;
   outputStream := TMemoryStream.Create;
   try
-    repeat
-      FStream.Read(Header, SizeOf(Header));
-      if Header.OPCode > 0 then
-        messageType:=TWebsocketMessageType(Header.OPCode);
-      if Header.PayloadLen < 126 then
-        len := Header.PayloadLen
-      else if Header.PayloadLen = 126 then
-        len := NToHs(FStream.ReadWord)
-      else
-        len := ntohll(FStream.ReadQWord);
-      if Header.Mask then
-      begin
-        MaskRec.Key := FStream.ReadDWord;
-      end
-      else if FAssumeMaskedMessages then
-      begin
-        // What to do now? standard says immediatly close stream
-        // how to communicate this to potentially other threads?
-        FStream.Free;
-        Exit;
-      end;
-      // Read payload
-      SetLength(buffer, len);
-      FStream.Read(buffer[0], len);
-      if Header.Mask then
-      begin
-        for i:=0 to len-1 do
+    try
+      repeat
+        if not Open then
+          Exit;
+        Header := WordToFrameHeader(FStream.ReadWord);
+        if Header.OPCode <> wmtContinue then
+          messageType := TWebsocketMessageType(Header.OPCode);
+        if Header.PayloadLen < 126 then
+          len := Header.PayloadLen
+        else if Header.PayloadLen = 126 then
+          len := NToHs(FStream.ReadWord)
+        else
+          len := ntohll(FStream.ReadQWord);
+        if Header.Mask then
         begin
-          buffer[i] := buffer[i] Xor MaskRec.Bytes[i mod 4];
+          MaskRec.Key := integer(FStream.ReadDWord);
+        end
+        else if FAssumeMaskedMessages then
+        begin
+          Close(True);
+          Exit;
+        end;
+        // Read payload
+        SetLength(buffer, len);
+        if len > 0 then
+        begin
+          FStream.ReadBuffer(buffer[0], len);
+          if Header.Mask then
+          begin
+            for i := 0 to len - 1 do
+            begin
+              buffer[i] := buffer[i] xor MaskRec.Bytes[i mod 4];
+            end;
+          end;
+          outputStream.WriteBuffer(buffer[0], len);
+        end;
+      until Header.Fin;
+      // Read whole message
+      outputStream.Seek(0, soBeginning);
+      case messageType of
+        wmtString:
+        begin
+          SetLength(str, outputStream.Size);
+          outputStream.ReadBuffer(str[1], outputStream.Size);
+          Message := TWebsocketStringMessage.Create(str);
+        end;
+        wmtBinary:
+        begin
+          SetLength(buffer, outputStream.Size);
+          outputStream.ReadBuffer(buffer[0], outputStream.Size);
+          Message := TWebsocketBinaryMessage.Create(buffer);
         end;
       end;
-      outputStream.Write(buffer[0], len);
-    until Header.Fin;
-    // Read whole message
-    outputStream.Seek(0, soBeginning);
-    case messageType of
-    wmtString:
-    begin
-      SetLength(str, outputStream.Size);
-      outputStream.Read(str[1], outputStream.Size);
-      Message := TWebsocketStringMessage.Create(str);
-    end;
-    wmtBinary:
-    begin
-      SetLength(buffer, outputStream.Size);
-      outputStream.Read(buffer[0], outputStream.Size);
-      Message := TWebsocketBinaryMessage.Create(buffer);
-    end;
-    end;
-  finally
-    outputStream.Free;
-  end;
-  if Assigned(Message) then
-  begin
-    lst := FMessages.Lock;
-    try
-      lst.Add(Message);
     finally
-      FMessages.Unlock;
+      outputStream.Free;
+    end;
+    if Assigned(Message) then
+    begin
+      lst := FMessages.Lock;
+      try
+        lst.Add(Message);
+      finally
+        FMessages.Unlock;
+      end;
+    end;
+    if Assigned(Message) and Assigned(FOnRecieveMessage) then
+    begin
+      FOnRecieveMessage(Self);
+    end;
+  except
+    On e: EReadError do
+    begin
+      // Stream has been closed
+      // FIXME: Some way to verify that?
+      Close(True);
     end;
   end;
 end;
@@ -503,11 +586,10 @@ begin
   *)
   Header.Fin := Finished;
   Header.Mask := (FMaskKey <> -1);
-  Header.Reserved := 0;
   if FFirstWrite then
-    Header.OPCode := Ord(FMessageType)
+    Header.OPCode := FMessageType
   else
-    Header.OPCode := Ord(wmtContinue);
+    Header.OPCode := wmtContinue;
   // Compute size
   if FCurrentLen < 126 then
     Header.PayloadLen := FCurrentLen
@@ -516,7 +598,7 @@ begin
   else
     Header.PayloadLen := 127;
   // Write header
-  FDataStream.Write(Header, SizeOf(Header));
+  FDataStream.WriteWord(FrameHEaderToWord(Header));
   // Write size if it exceeds 125
   if (FCurrentLen > 125) then
   begin
@@ -530,13 +612,13 @@ begin
     // If we use a mask
     MaskRec.Key := FMaskKey;
     // First: Transmit mask Key
-    FDataStream.Write(MaskRec.Bytes[0], 4);
+    FDataStream.WriteBuffer(MaskRec.Bytes[0], 4);
     // 2. Encode Message
     for i := 0 to FCurrentLen - 1 do
       FBuffer[i] := FBuffer[i] xor MaskRec.Bytes[i mod 4];
   end;
   // Write Message payload
-  FDataStream.Write(FBuffer[0], FCurrentLen);
+  FDataStream.WriteBuffer(FBuffer[0], FCurrentLen);
   // Reset state for next data
   FCurrentLen := 0;
 end;
@@ -589,6 +671,7 @@ begin
   end;
   Move(Buffer, FBuffer[FCurrentLen], Count);
   FCurrentLen += Count;
+  Result := Count;
 end;
 
 { TWebsocketMessage }
@@ -600,7 +683,7 @@ end;
 
 { TWebsocketStringMessage }
 
-constructor TWebsocketStringMessage.Create(const AData: UnicodeString);
+constructor TWebsocketStringMessage.Create(const AData: UTF8String);
 begin
   inherited Create(wmtString);
   FData := AData;
@@ -635,10 +718,16 @@ end;
 procedure TWebsocketHandler.HandleCommunication(
   ACommunicator: TWebsocketCommunincator);
 begin
+  // No implementation; To be overriden
+end;
+
+procedure TThreadedWebsocketHandler.HandleCommunication(
+  ACommunicator: TWebsocketCommunincator);
+begin
   CreateHandlerThread(ACommunicator, Self);
 end;
 
-procedure TWebsocketHandler.DoHandleCommunication(
+procedure TThreadedWebsocketHandler.DoHandleCommunication(
   ACommunication: TWebsocketCommunincator);
 begin
   // No implementation; To be overriden
@@ -708,7 +797,7 @@ begin
   // Check if this is HTTP by checking the first line
   // Method GET is required
   SetLength(method, 4);
-  Stream.Read(method[1], 4);
+  Stream.ReadBuffer(method[1], 4);
   if method <> 'GET ' then
   begin
     // Not GET
@@ -764,7 +853,7 @@ begin
   try
     b64Encoder := TBase64EncodingStream.Create(OutputStream);
     try
-      b64Encoder.Write(keyHash[low(keyHash)], Length(keyHash));
+      b64Encoder.WriteBuffer(keyHash[low(keyHash)], Length(keyHash));
       b64Encoder.Flush;
       Result := OutputStream.DataString;
     finally
@@ -873,10 +962,8 @@ begin
 end;
 
 procedure TWebSocketServer.HandleConnect(Sender: TObject; Data: TSocketStream);
-var
-  acceptingThread: TAcceptingThread;
 begin
-  acceptingThread := CreateAcceptingThread(Data, FHostMap);
+  CreateAcceptingThread(Data, FHostMap);
 end;
 
 procedure TWebSocketServer.Start;
@@ -936,8 +1023,8 @@ end;
 
 initialization
   AcceptingThreadPool := TLockedAcceptingThreadPool.Create(TAcceptingThreadPool.Create);
-  HandlerThreadPool:= TLockedHandlerThreadPool.Create(THandlerThreadPool.Create);
-  RecieverThreadPool:= TLockedRecieverThreadPool.Create(TRecieverThreadPool.Create);
+  HandlerThreadPool := TLockedHandlerThreadPool.Create(THandlerThreadPool.Create);
+  RecieverThreadPool := TLockedRecieverThreadPool.Create(TRecieverThreadPool.Create);
 
 finalization
   AcceptingThreadPool.Free;

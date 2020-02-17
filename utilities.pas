@@ -70,38 +70,39 @@ type
   TStreamHelper = class helper for TStream
   public
     procedure ReadTo(const pattern: string; out Result: string; MaxLen: integer = 1024);
-    function WriteRaw(const Data: string): longint;
+    procedure WriteRaw(const Data: string);
   end;
 
   { TStringObjectMap }
 
   generic TStringObjectMap<T> = class
-  private type
-    TStrObjMap = class(specialize TFPGMap<String, T>);
+  private
+    type
+    TStrObjMap = class(specialize TFPGMap<string, T>);
   private
     FObjects: TStrObjMap;
     FDefaultObject: T;
-    FFreeObjects: Boolean;
+    FFreeObjects: boolean;
 
-    function GetObject(const AKey: String): T;
+    function GetObject(const AKey: string): T;
     procedure SetDefault(AValue: T);
-    procedure SetObject(const AKey: String; AValue: T);
+    procedure SetObject(const AKey: string; AValue: T);
   public
-    constructor Create(FreeObjects: Boolean);
+    constructor Create(FreeObjects: boolean);
     destructor Destroy; override;
 
-    procedure RemoveHandler(const AKey: String);
-    function TryGetObject(const AKey: String; out AObject: T): Boolean;
+    procedure RemoveHandler(const AKey: string);
+    function TryGetObject(const AKey: string; out AObject: T): boolean;
 
     property DefaultObject: T read FDefaultObject write SetDefault;
-    property Objects[const AKey: String]: T read GetObject write SetObject; default;
+    property Objects[const AKey: string]: T read GetObject write SetObject; default;
   end;
 
 implementation
 
 { TStringObjectMap }
 
-function TStringObjectMap.GetObject(const AKey: String): T;
+function TStringObjectMap.GetObject(const AKey: string): T;
 begin
   if not FObjects.TryGetData(AKey, Result) then
     Result := DefaultObject;
@@ -109,14 +110,14 @@ end;
 
 procedure TStringObjectMap.SetDefault(AValue: T);
 begin
-  if FDefaultObject=AValue then Exit;
+  if FDefaultObject = AValue then
+    Exit;
   if FFreeObjects and (FObjects.IndexOfData(AValue) < 0) then
     FDefaultObject.Free;
-  FDefaultObject:=AValue;
+  FDefaultObject := AValue;
 end;
 
-procedure TStringObjectMap.SetObject(const AKey: String; AValue: T
-  );
+procedure TStringObjectMap.SetObject(const AKey: string; AValue: T);
 var
   tmp: T;
 begin
@@ -125,20 +126,20 @@ begin
   FObjects[AKey] := AValue;
 end;
 
-constructor TStringObjectMap.Create(FreeObjects: Boolean);
+constructor TStringObjectMap.Create(FreeObjects: boolean);
 begin
   FObjects := TStrObjMap.Create;
-  FObjects.Sorted:= True;
-  FFreeObjects:= FreeObjects;
+  FObjects.Sorted := True;
+  FFreeObjects := FreeObjects;
 end;
 
 destructor TStringObjectMap.Destroy;
 var
-  i: Integer;
+  i: integer;
 begin
   if FFreeObjects then
   begin
-    for i := 0 to FObjects.Count -1 do
+    for i := 0 to FObjects.Count - 1 do
     begin
       if FObjects.Data[i] = FDefaultObject then
         FDefaultObject := nil;
@@ -150,20 +151,21 @@ begin
   inherited Destroy;
 end;
 
-procedure TStringObjectMap.RemoveHandler(const AKey: String);
+procedure TStringObjectMap.RemoveHandler(const AKey: string);
 var
-  idx: Integer;
+  idx: integer;
 begin
   if FObjects.Find(AKey, idx) then
   begin
-    if FDefaultObject = FObjects.Data[idx] then FDefaultObject := nil;
-    if FFreeObjects then FObjects.Data[idx].Free;
+    if FDefaultObject = FObjects.Data[idx] then
+      FDefaultObject := nil;
+    if FFreeObjects then
+      FObjects.Data[idx].Free;
     FObjects.Delete(idx);
   end;
 end;
 
-function TStringObjectMap.TryGetObject(const AKey: String; out AObject: T
-  ): Boolean;
+function TStringObjectMap.TryGetObject(const AKey: string; out AObject: T): boolean;
 begin
   Result := FObjects.TryGetData(AKey, AObject);
 end;
@@ -242,7 +244,7 @@ begin
         pLen := 0;
         while backtrack + pLen < len do
         begin
-          if pattern[pLen] = Result[backtrack + pLen] then
+          if pattern[pLen + 1] = Result[backtrack + pLen + 1] then
             Inc(pLen)
           else
           begin
@@ -261,9 +263,9 @@ end;
  * HTTP writes plaintext, so this is a wrapper for .Write for ommiting the
  * Count parameter
  * ----------------------------------------------------------------------------}
-function TStreamHelper.WriteRaw(const Data: string): longint;
+procedure TStreamHelper.WriteRaw(const Data: string);
 begin
-  Result := self.Write(Data[1], Data.Length);
+  self.WriteBuffer(Data[1], Data.Length);
 end;
 
 
