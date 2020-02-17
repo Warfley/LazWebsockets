@@ -79,7 +79,7 @@ type
   private type
     TStrObjMap = class(specialize TFPGMap<String, T>);
   private
-    FHandlers: TStrObjMap;
+    FObjects: TStrObjMap;
     FDefaultObject: T;
     FFreeObjects: Boolean;
 
@@ -91,9 +91,10 @@ type
     destructor Destroy; override;
 
     procedure RemoveHandler(const AKey: String);
+    function TryGetObject(const AKey: String; out AObject: T): Boolean;
 
     property DefaultObject: T read FDefaultObject write SetDefault;
-    property Objects[const AKey: String]: T read GetObject write SetObject;
+    property Objects[const AKey: String]: T read GetObject write SetObject; default;
   end;
 
 implementation
@@ -102,14 +103,14 @@ implementation
 
 function TStringObjectMap.GetObject(const AKey: String): T;
 begin
-  if not FHandlers.TryGetData(AKey, Result) then
+  if not FObjects.TryGetData(AKey, Result) then
     Result := DefaultObject;
 end;
 
 procedure TStringObjectMap.SetDefault(AValue: T);
 begin
   if FDefaultObject=AValue then Exit;
-  if FFreeObjects and (FHandlers.IndexOfData(AValue) < 0) then
+  if FFreeObjects and (FObjects.IndexOfData(AValue) < 0) then
     FDefaultObject.Free;
   FDefaultObject:=AValue;
 end;
@@ -119,15 +120,15 @@ procedure TStringObjectMap.SetObject(const AKey: String; AValue: T
 var
   tmp: T;
 begin
-  if FHandlers.TryGetData(AKey, tmp) then
+  if FObjects.TryGetData(AKey, tmp) then
     tmp.Free;
-  FHandlers[AKey] := AValue;
+  FObjects[AKey] := AValue;
 end;
 
 constructor TStringObjectMap.Create(FreeObjects: Boolean);
 begin
-  FHandlers := TStrObjMap.Create;
-  FHandlers.Sorted:= True;
+  FObjects := TStrObjMap.Create;
+  FObjects.Sorted:= True;
   FFreeObjects:= FreeObjects;
 end;
 
@@ -137,15 +138,15 @@ var
 begin
   if FFreeObjects then
   begin
-    for i := 0 to FHandlers.Count -1 do
+    for i := 0 to FObjects.Count -1 do
     begin
-      if FHandlers.Data[i] = FDefaultObject then
+      if FObjects.Data[i] = FDefaultObject then
         FDefaultObject := nil;
-      FHandlers.Data[i].Free;
+      FObjects.Data[i].Free;
     end;
     FDefaultObject.Free;
   end;
-  FHandlers.Free;
+  FObjects.Free;
   inherited Destroy;
 end;
 
@@ -153,12 +154,18 @@ procedure TStringObjectMap.RemoveHandler(const AKey: String);
 var
   idx: Integer;
 begin
-  if FHandlers.Find(AKey, idx) then
+  if FObjects.Find(AKey, idx) then
   begin
-    if FDefaultObject = FHandlers.Data[idx] then FDefaultObject := nil;
-    if FFreeObjects then FHandlers.Data[idx].Free;
-    FHandlers.Delete(idx);
+    if FDefaultObject = FObjects.Data[idx] then FDefaultObject := nil;
+    if FFreeObjects then FObjects.Data[idx].Free;
+    FObjects.Delete(idx);
   end;
+end;
+
+function TStringObjectMap.TryGetObject(const AKey: String; out AObject: T
+  ): Boolean;
+begin
+  Result := FObjects.TryGetData(AKey, AObject);
 end;
 
 { TThreadedObject }
@@ -228,7 +235,7 @@ begin
         end;
         Inc(pLen);
         if pLen = pattern.Length then
-          Break;
+          Exit;
       end
       else if plen > 0 then
       begin
