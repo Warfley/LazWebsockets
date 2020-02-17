@@ -47,6 +47,8 @@ var
     while ACommunication.Open do
     begin
       ReadLn(str);
+      if not ACommunication.Open then
+        Break; // could be closed by the time ReadLn takes
       with ACommunication.WriteMessage do
         try
           WriteRaw(str);
@@ -56,6 +58,7 @@ var
       WriteLn('Message sent to ',
         NetAddrToStr(ACommunication.SocketStream.RemoteAddress.sin_addr), ': ', str);
     end;
+    socket.Stop(True);
   end;
 
   procedure TSocketHandler.ConnectionClosed(Sender: TObject);
@@ -91,6 +94,11 @@ var
 
 begin
   socket := TWebSocketServer.Create(8080);
-  socket.RegisterHandler('*', '*', TSocketHandler.Create, True, True);
-  socket.Start;
+  try
+    socket.FreeHandlers := True;
+    socket.RegisterHandler('*', '*', TSocketHandler.Create, True, True);
+    socket.Start;
+  finally
+    socket.Free;
+  end;
 end.

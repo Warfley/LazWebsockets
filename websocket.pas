@@ -24,7 +24,8 @@ type
   end;
 
   // Represent opcodes
-  TWebsocketMessageType = (wmtContinue = 0, wmtString = 1, wmtBinary = 2);
+  TWebsocketMessageType = (wmtContinue = 0, wmtString = 1, wmtBinary =
+    2, wmtClose = 8, wmtPing = 9, wmtPong = 10);
 
   { TWebsocketMessage }
 
@@ -39,6 +40,18 @@ type
   { TWebsocketStringMessage }
 
   TWebsocketStringMessage = class(TWebsocketMessage)
+  private
+    FData: UTF8String;
+  public
+    constructor Create(const AData: UTF8String);
+    property Data: UTF8String read FData;
+  end;
+
+  { TWebsocketStringMessage }
+
+  { TWebsocketPongMessage }
+
+  TWebsocketPongMessage = class(TWebsocketMessage)
   private
     FData: UTF8String;
   public
@@ -94,6 +107,7 @@ type
     FOnRecieveMessage: TNotifyEvent;
     FOnClose: TNotifyEvent;
     FOpen: boolean;
+    FExpectClose: boolean;
     function GenerateMask: integer;
   public
     constructor Create(AStream: TSocketStream; AMaskMessage: boolean;
@@ -430,6 +444,7 @@ begin
   FAssumeMaskedMessages := AssumeMaskedMessages;
   FMessages := TLockedMessageList.Create(TMessageList.Create);
   FOpen := True;
+  FExpectClose := False;
 end;
 
 destructor TWebsocketCommunincator.Destroy;
@@ -446,15 +461,37 @@ begin
     Exit;
   if not ForceClose then
   begin
-    // TODO: send shutdown message
+    WriteMessage(wmtClose).Free;
+    FExpectClose := True;
+    Exit;
   end;
+  FOpen := False;
   if Assigned(FOnClose) then
     FOnClose(Self);
-  FOpen := False;
   FStream.Free;
 end;
 
 procedure TWebsocketCommunincator.RecieveMessages;
+
+  procedure AddMessageToList(Message: TWebsocketMessage);
+  var
+    lst: TMessageList;
+  begin
+    if Assigned(Message) then
+    begin
+      lst := FMessages.Lock;
+      try
+        lst.Add(Message);
+      finally
+        FMessages.Unlock;
+      end;
+      if Assigned(FOnRecieveMessage) then
+      begin
+        FOnRecieveMessage(Self);
+      end;
+    end;
+  end;
+
 var
   Header: TWebsocketFrameHeader;
   len: int64;
@@ -464,7 +501,6 @@ var
   Message: TWebsocketMessage;
   outputStream: TMemoryStream;
   messageType: TWebsocketMessageType;
-  lst: TMessageList;
   str: UTF8String;
 begin
   Message := nil;
@@ -504,7 +540,42 @@ begin
               buffer[i] := buffer[i] xor MaskRec.Bytes[i mod 4];
             end;
           end;
-          outputStream.WriteBuffer(buffer[0], len);
+        end;
+        // Handling special messages
+        case messageType of
+          wmtClose:
+          begin
+            // If we didn't send the original close, return the message
+            if not FExpectClose then
+              WriteMessage(wmtClose).Free;
+            // Close the stream (true to not send a message
+            Close(True);
+          end;
+          wmtPing:
+          begin
+            // On ping send pong, with same content
+            with WriteMessage(wmtPong) do
+              try
+                if len > 0 then
+                  Write(buffer[0], len);
+              finally
+                Free;
+              end;
+          end;
+          wmtPong:
+          begin
+            // lift pong message to message queue, so user can handle it
+            SetLength(str, len);
+            if len > 0 then
+              Move(buffer[0], str[1], len);
+            AddMessageToList(TWebsocketPongMessage.Create(str));
+          end;
+          else
+          begin
+            // This is a dataframe, so save data for concatination of fragments
+            if len > 0 then
+              outputStream.WriteBuffer(buffer[0], len);
+          end;
         end;
       until Header.Fin;
       // Read whole message
@@ -523,21 +594,9 @@ begin
           Message := TWebsocketBinaryMessage.Create(buffer);
         end;
       end;
+      AddMessageToList(Message);
     finally
       outputStream.Free;
-    end;
-    if Assigned(Message) then
-    begin
-      lst := FMessages.Lock;
-      try
-        lst.Add(Message);
-      finally
-        FMessages.Unlock;
-      end;
-    end;
-    if Assigned(Message) and Assigned(FOnRecieveMessage) then
-    begin
-      FOnRecieveMessage(Self);
     end;
   except
     On e: EReadError do
@@ -581,9 +640,6 @@ var
   i: int64;
   MaskRec: TMaskRec;
 begin
-  (* Can we actually send 0 len packages?
-  if FCurrentLen = 0 then Exit; // Nothing to write
-  *)
   Header.Fin := Finished;
   Header.Mask := (FMaskKey <> -1);
   if FFirstWrite then
@@ -686,6 +742,15 @@ end;
 constructor TWebsocketStringMessage.Create(const AData: UTF8String);
 begin
   inherited Create(wmtString);
+  FData := AData;
+  SetLength(FData, Length(FData));
+end;
+
+{ TWebsocketPongMessage }
+
+constructor TWebsocketPongMessage.Create(const AData: UTF8String);
+begin
+  inherited Create(wmtPong);
   FData := AData;
   SetLength(FData, Length(FData));
 end;
