@@ -2,8 +2,8 @@ program example;
 
 {$mode objfpc}{$H+}
 
-uses {$IFDEF UNIX} {$IFDEF UseCThreads}
-  cthreads, {$ENDIF} {$ENDIF}
+uses {$IFDEF UNIX}
+  cthreads, {$ENDIF}
   Classes,
   SysUtils,
   WebSocket,
@@ -40,8 +40,7 @@ var
   var
     str: string;
   begin
-    WriteLn('Connected to ', NetAddrToStr(
-      ACommunication.SocketStream.RemoteAddress.sin_addr));
+    WriteLn('Connected to ', ACommunication.SocketStream.RemoteAddress.Address);
     ACommunication.OnRecieveMessage := @MessageRecieved;
     ACommunication.OnClose := @ConnectionClosed;
     while ACommunication.Open do
@@ -55,8 +54,8 @@ var
         finally
           Free;
         end;
-      WriteLn('Message sent to ',
-        NetAddrToStr(ACommunication.SocketStream.RemoteAddress.sin_addr), ': ', str);
+      WriteLn('Message to ', ACommunication.SocketStream.RemoteAddress.Address,
+        ': ', str);
     end;
     socket.Stop(True);
   end;
@@ -66,8 +65,7 @@ var
     Comm: TWebsocketCommunincator;
   begin
     Comm := TWebsocketCommunincator(Sender);
-    WriteLn('Connection to ', NetAddrToStr(Comm.SocketStream.RemoteAddress.sin_addr),
-      ' closed');
+    WriteLn('Connection to ', Comm.SocketStream.RemoteAddress.Address, ' closed');
   end;
 
   procedure TSocketHandler.MessageRecieved(Sender: TObject);
@@ -83,8 +81,7 @@ var
       for m in Messages do
         if m is TWebsocketStringMessage then
         begin
-          WriteLn('Message from ',
-            NetAddrToStr(Comm.SocketStream.RemoteAddress.sin_addr),
+          WriteLn('Message from ', Comm.SocketStream.RemoteAddress.Address,
             ': ', TWebsocketStringMessage(m).Data);
         end;
     finally
