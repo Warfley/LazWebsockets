@@ -49,11 +49,13 @@ type
     property LocalAddress: TNetAddress read FLocalAddress;
   end;
 
+  TWebsocketCommunincator = class;
+
   { TWebsocketMessageStream }
 
   TWebsocketMessageStream = class(TStream)
   private
-    FDataStream: TLockedSocketStream;
+    FCommunicator: TWebsocketCommunincator;
     FMaxFrameSize: int64;
     FMessageType: TWebsocketMessageType;
     FBuffer: TBytes;
@@ -63,9 +65,9 @@ type
 
     procedure WriteDataFrame(Finished: boolean = False);
   public
-    constructor Create(const ADataStream: TLockedSocketStream;
-      AMessageType: TWebsocketMessageType = wmtString;
-      AMaxFrameLen: int64 = 125; AMaskKey: integer = -1);
+    constructor Create(const ACommunicator: TWebsocketCommunincator;
+      AMessageType: TWebsocketMessageType; AMaxFrameLen: int64;
+  AMaskKey: integer);
     destructor Destroy; override;
     function Seek(Offset: longint; Origin: word): longint; override;
     function Read(var Buffer; Count: longint): longint; override;
@@ -291,7 +293,7 @@ procedure TWebsocketCommunincator.RecieveMessage;
     oldTO: integer;
     Stream: TSocketStream;
   const
-    IOTimeoutError = 11;
+    IOTimeoutError = {$IFDEF UNIX}11{$ELSE}10060{$EndIf};
     WaitingTime = 10;
   begin
     TotalRead := 0;
@@ -510,7 +512,7 @@ end;
 function TWebsocketCommunincator.WriteMessage(MessageType: TWebsocketMessageType;
   MaxFrameLength: int64): TWebsocketMessageStream;
 begin
-  Result := TWebsocketMessageStream.Create(FStream, MessageType,
+  Result := TWebsocketMessageStream.Create(Self, MessageType,
     MaxFrameLength, generateMask);
 end;
 
@@ -539,69 +541,81 @@ var
   i: int64;
   MaskRec: TMaskRec;
   Stream: TSocketStream;
+const
+  // FIXME: check if this is the real unix code
+  ConnectionIsDeadCode = {$IfDef UNIX}0{$ELSE}10053{$ENDIF};
 begin
-  Stream := FDataStream.Lock;
   try
-    if not Assigned(Stream) then
-    begin
-      raise EWebsocketWriteError.Create('Stream already closed', 0);
-    end;
+    Stream := FCommunicator.SocketStream.Lock;
     try
-      Header.Fin := Finished;
-      Header.Mask := (FMaskKey <> -1);
-      if FFirstWrite then
-        Header.OPCode := FMessageType
-      else
-        Header.OPCode := wmtContinue;
-      // Compute size
-      if FCurrentLen < 126 then
-        Header.PayloadLen := FCurrentLen
-      else if FCurrentLen <= word.MaxValue then
-        Header.PayloadLen := 126
-      else
-        Header.PayloadLen := 127;
-      // Write header
-      Stream.WriteWord(FrameHEaderToWord(Header));
-      // Write size if it exceeds 125
-      if (FCurrentLen > 125) then
+      if not Assigned(Stream) then
       begin
-        if (FCurrentLen <= word.MaxValue) then
-          Stream.WriteWord(htons(word(FCurrentLen)))
+        raise EWebsocketWriteError.Create('Stream already closed', 0);
+      end;
+      try
+        Header.Fin := Finished;
+        Header.Mask := (FMaskKey <> -1);
+        if FFirstWrite then
+          Header.OPCode := FMessageType
         else
-          Stream.WriteQWord(htonll(QWord(FCurrentLen)));
-      end;
-      if Header.Mask then
-      begin
-        // If we use a mask
-        MaskRec.Key := FMaskKey;
-        // First: Transmit mask Key
-        Stream.WriteBuffer(MaskRec.Bytes[0], 4);
-        // 2. Encode Message
-        // As this is 64 bit, to be 32 bit compatible we can't use a for loop
-        i := 0;
-        while i < FCurrentLen do
+          Header.OPCode := wmtContinue;
+        // Compute size
+        if FCurrentLen < 126 then
+          Header.PayloadLen := FCurrentLen
+        else if FCurrentLen <= word.MaxValue then
+          Header.PayloadLen := 126
+        else
+          Header.PayloadLen := 127;
+        // Write header
+        Stream.WriteWord(FrameHEaderToWord(Header));
+        // Write size if it exceeds 125
+        if (FCurrentLen > 125) then
         begin
-          FBuffer[i] := FBuffer[i] xor MaskRec.Bytes[i mod 4];
-          Inc(i);
+          if (FCurrentLen <= word.MaxValue) then
+            Stream.WriteWord(htons(word(FCurrentLen)))
+          else
+            Stream.WriteQWord(htonll(QWord(FCurrentLen)));
         end;
+        if Header.Mask then
+        begin
+          // If we use a mask
+          MaskRec.Key := FMaskKey;
+          // First: Transmit mask Key
+          Stream.WriteBuffer(MaskRec.Bytes[0], 4);
+          // 2. Encode Message
+          // As this is 64 bit, to be 32 bit compatible we can't use a for loop
+          i := 0;
+          while i < FCurrentLen do
+          begin
+            FBuffer[i] := FBuffer[i] xor MaskRec.Bytes[i mod 4];
+            Inc(i);
+          end;
+        end;
+        // Write Message payload
+        Stream.WriteBuffer(FBuffer[0], FCurrentLen);
+        // Reset state for next data
+        FCurrentLen := 0;
+      except
+        on E: EWriteError do
+          raise EWebsocketWriteError.Create(e.Message, Stream.LastError);
       end;
-      // Write Message payload
-      Stream.WriteBuffer(FBuffer[0], FCurrentLen);
-      // Reset state for next data
-      FCurrentLen := 0;
-    except
-      on E: EWriteError do
-        raise EWebsocketWriteError.Create(e.Message, Stream.LastError);
+    finally
+      FCommunicator.SocketStream.Unlock;
     end;
-  finally
-    FDataStream.Unlock;
+  except
+    on E: EWebsocketWriteError do
+    begin
+      if E.Code = ConnectionIsDeadCode then
+        FCommunicator.Close(True);
+      raise;
+    end;
   end;
 end;
 
-constructor TWebsocketMessageStream.Create(const ADataStream: TLockedSocketStream;
+constructor TWebsocketMessageStream.Create(const ACommunicator: TWebsocketCommunincator;
   AMessageType: TWebsocketMessageType; AMaxFrameLen: int64; AMaskKey: integer);
 begin
-  FDataStream := ADataStream;
+  FCommunicator := ACommunicator;
   FMaxFrameSize := AMaxFrameLen;
   FMessageType := AMessageType;
   SetLength(FBuffer, AMaxFrameLen);
