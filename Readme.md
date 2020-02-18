@@ -4,10 +4,10 @@ It is fully based upon the fcl `ssockets` unit and therefore independent from an
 It can thereby easiely built only using fpc without Lazarus or complicated makefiles.
 
 ## Installation
-There is currently no Lazarus package, as this is in quite an early phase. To use, simply add `websockets.pas` and `utilities.pas` to your project and start hacking
+There is a Lazarus package file (`websockets.lpk`) in this repository that can be used for Lazarus projects. An other option is to simply add the `src` directory to your unit search path.
 
 ## Usage & Functionality
-For a simple example server see the `example.lpi` Lazarus project.
+For a simple example server see the `chatServer.pas` in the examples directory.
 ### Setting up the Server
 To create a `TWebSocketServer` the constructor mirrors the constructor of `ssockets.TInetServer` and can be called with either only a port, or an address, port and optionally a `ssockets.TSocketHandler` (e.g. to provide TLS support).
 So in order to create a simple WebSocket listener on port 8080 we can simply use:
@@ -60,7 +60,7 @@ It will then start accepting clients on this thread until `Server.Stop` is calle
 ### Recieving and Sending Messages
 All the communication is done via the `TWebsocketCommunincator` class. It provides three basic methods for communication:
 ```
-procedure RecieveMessages;
+procedure RecieveMessage;
 function GetUnprocessedMessages(const MsgList: TWebsocketMessageOwnerList): integer; 
 function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
   MaxFrameLength: int64 = 125): TWebsocketMessageStream;
@@ -69,12 +69,14 @@ function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
 
 Lastly we have `WriteMessage` which creates a `TWebsocketMessageStream` for us to send messages to the client. These should be either string (`wmtString`), binary (`wmtBinary`) or ping (`wmtPing`) messages. After a ping, the responding pong will be recieved by RecieveMessages and can be processed by the user as any other message.
 
+While `RecieveMessage` is blocking until at least one message is read. But it is implemented thread safe, meaning you can send messages while reading, without problems. This is archived by locking, while in general not nessecary as reading and writing can technically be done in parallel, but to avoid complications we lock stream access
+
 Besides those the `TWebsocketCommunincator` class also provides two properties:
 ```
-property SocketStream: TSocketStream;
+property SocketStream: TLockedSocketStream;
 property Open: boolean;
 ```
-`SocketStream` grants access to the raw underlying connection and `Open` contains the state of the stream. At the current point in time the stream access is not locked, as the reading method `RecieveMessages` is blocking. So it can theoretically happen that the stream gets closed while writing to it. If this happen, pray for an error to arise, because than anything could happen.
+`SocketStream` grants access to the raw underlying connection and `Open` can be used to check whether the stream is still open.
 
 Lastly the communicator provides two events:
 ```
@@ -84,8 +86,8 @@ property OnClose: TNotifyEvent;
 `OnRecieveMessage` is triggered when `RecieveMessages` adds a new message to the message queue and `OnClose` will be triggered when the stream closes, either due to an abrupt disconnect of the underlying TCP stream (detected by a stream reding error while recieving Messages) or after sending the close message. It will be called before the `TSocketStream` object will be destroyed, so you still have access to it, e.g. to its `RemoteAddress` attribute to identify the client. Both of these events are fired in the context of the thread discovering them, most likely the thread calling `RecieveMessages`. Any cross thread accesses need to be secured by the user, either using `TThread.Queue`, `TThread.Synchronize`, `critical sections` or any other method of handling inter-thread communications.
 
 ## Example
-The example server can be built either by opening the Lazarus project (`example.lpi`) and building it with the IDE or using fpc directly by calling
+The `chatServer` example can be built in multiple ways. Either by opening the Lazarus project (`examples/chatServer.lpi`) and building it with the IDE, or by using make in the examples directory, or by using the fpc directly via:
 ```
-$> fpc ./example.lpr
+$> fpc -Fu ../src chatServer.pas
 ```
-The client for this is the html document `example_client.html` and should be usable with any modern browser. The example is a simple chat that lets the user input text messages to send to the other party, and recieve their messages asynchronously. You can try to connect with multiple clients at once to the server as it uses a threaded handler, but isn't built for reading more than a message for one client at a time, so funny things might happen.
+The client for this is the html document `chatClient.html` and should be usable with any modern browser. The example is a simple chat that lets the user input text messages to send to the other party, and recieve their messages asynchronously. You can try to connect with multiple clients at once to the server as it uses a threaded handler, but isn't built for reading more than a message for one client at a time, so funny things might happen.

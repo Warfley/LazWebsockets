@@ -1,4 +1,4 @@
-unit utilities;
+unit wsutils;
 
 {$mode objfpc}{$H+}
 
