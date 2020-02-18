@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+<script>
+    var wsAddr = "ws://127.0.0.1:8080/";
+    var ws = null;
+
+    function writeToBox(msg) {
+        document.getElementById("messageBox").innerHTML += msg + "<br />";
+    }
+
+    function connectClick() {
+        ws = new WebSocket(wsAddr)
+        ws.onopen = function(ev) {
+            writeToBox("connection established");
+        }
+        ws.onmessage = function(ev) {
+            writeToBox("Message from Server: " + ev.data);
+        }
+        ws.onclose  = function(ev) {
+            writeToBox("Connection closed");
+        }
+        ws.onerror = function(ev) {
+            writeToBox("error")
+        }
+    }
+
+    function disconnectClick() {
+        ws.onclose = function() {};
+        ws.close();
+    }
+
+    function sendBtnClick() {
+        let txtData = document.getElementById("inpBox").value;
+        writeToBox("Sent to Server: " + txtData);
+        ws.send(txtData);
+        document.getElementById("inpBox").value = "";
+    }
+    function pingBtnClick() {
+        let txtData = document.getElementById("inpBox").value;
+        writeToBox("Sent to Server: " + txtData);
+        ws.send(txtData);
+        document.getElementById("inpBox").value = "";
+    }
+</script>
+</head>
+<body>
+    <button onclick="connectClick()">Connect</button>
+    <button onclick="disconnectClick()">Disconnect</button>
+    <div id="messageBox"></div>
+    <input id="inpBox" /><button onclick="sendBtnClick()">Send</button>
+</body>
+</html>
