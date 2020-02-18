@@ -72,12 +72,12 @@ var
 
   procedure TSocketHandler.MessageRecieved(Sender: TObject);
   var
-    Messages: TMessageOwnerList;
+    Messages: TWebsocketMessageOwnerList;
     m: TWebsocketMessage;
     Comm: TWebsocketCommunincator;
   begin
     Comm := TWebsocketCommunincator(Sender);
-    Messages := TMessageOwnerList.Create(True);
+    Messages := TWebsocketMessageOwnerList.Create(True);
     try
       Comm.GetUnprocessedMessages(Messages);
       for m in Messages do

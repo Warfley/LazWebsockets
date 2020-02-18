@@ -69,9 +69,9 @@ type
     property Data: TBytes read FData;
   end;
 
-  TMessageList = class(specialize TFPGList<TWebsocketMessage>);
-  TMessageOwnerList = class(specialize TFPGObjectList<TWebsocketMessage>);
-  TLockedMessageList = class(specialize TThreadedObject<TMessageList>);
+  TWebsocketMessageList = class(specialize TFPGList<TWebsocketMessage>);
+  TWebsocketMessageOwnerList = class(specialize TFPGObjectList<TWebsocketMessage>);
+  TLockedWebsocketMessageList = class(specialize TThreadedObject<TWebsocketMessageList>);
 
   { TWebsocketMessageStream }
 
@@ -101,7 +101,7 @@ type
   TWebsocketCommunincator = class
   private
     FStream: TSocketStream;
-    FMessages: TLockedMessageList;
+    FMessages: TLockedWebsocketMessageList;
     FMaskMessages: boolean;
     FAssumeMaskedMessages: boolean;
     FOnRecieveMessage: TNotifyEvent;
@@ -115,16 +115,18 @@ type
     destructor Destroy; override;
 
     procedure Close(ForceClose: boolean = False);
-    procedure RecieveMessages;
+
+    procedure RecieveMessage;
+    function GetUnprocessedMessages(const MsgList: TWebsocketMessageOwnerList): integer;
+
     function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
       MaxFrameLength: int64 = 125): TWebsocketMessageStream;
 
-    function GetUnprocessedMessages(const MsgList: TMessageOwnerList): integer;
-    property Open: boolean read FOpen;
     property OnRecieveMessage: TNotifyEvent read FOnRecieveMessage
       write FOnRecieveMessage;
     property OnClose: TNotifyEvent read FOnClose write FOnClose;
     property SocketStream: TSocketStream read FStream;
+    property Open: boolean read FOpen;
   end;
 
   { TWebsocketHandler }
@@ -168,6 +170,7 @@ type
     constructor Create;
   end;
 
+  TServerAcceptingMethod = (samDefault, samThreaded, samThreadPool);
 
   { TWebSocketServer }
 
@@ -176,6 +179,7 @@ type
     FSocket: TInetServer;
     FHostMap: TLockedHostMap;
     FFreeHandlers: boolean;
+    FAcceptingMethod: TServerAcceptingMethod;
 
     procedure DoCreate;
     procedure HandleConnect(Sender: TObject; Data: TSocketStream);
@@ -193,6 +197,8 @@ type
     constructor Create(const APort: word);
     property Socket: TInetServer read FSocket;
     property FreeHandlers: boolean read FFreeHandlers write FFreeHandlers;
+    property AcceptingMethod: TServerAcceptingMethod
+      read FAcceptingMethod write FAcceptingMethod;
   end;
 
 const
@@ -290,19 +296,29 @@ type
     TRecieverThreadFactory, TRecieverThreadFactory>;
   TLockedRecieverThreadPool = specialize TThreadedObject<TRecieverThreadPool>;
 
+  { TWebsocketHandshakeHandler }
 
-  { TAcceptingThread }
-
-  TAcceptingThread = class(TPoolableThread)
+  TWebsocketHandshakeHandler = class
   private
     FStream: TSocketStream;
     FHostMap: TLockedHostMap;
     function ReadRequest(var RequestData: TRequestData): boolean;
     function GenerateAcceptingKey(const Key: string): string;
+  public
+    procedure PerformHandshake;
+    constructor Create(AStream: TSocketStream; AHostMap: TLockedHostMap);
+  end;
+
+  { TAcceptingThread }
+
+  TAcceptingThread = class(TPoolableThread)
+  private
+    FHandshakeHandler: TWebsocketHandshakeHandler;
   protected
     procedure DoExecute; override;
-    property Stream: TSocketStream read FStream write FStream;
-    property HostMap: TLockedHostMap read FHostMap write FHostMap;
+
+    property HandshakeHandler: TWebsocketHandshakeHandler
+      read FHandshakeHandler write FHandshakeHandler;
   end;
 
   TAcceptingThreadFactory = specialize TPoolableThreadFactory<TAcceptingThread>;
@@ -315,16 +331,15 @@ var
   HandlerThreadPool: TLockedHandlerThreadPool;
   AcceptingThreadPool: TLockedAcceptingThreadPool;
 
-function CreateAcceptingThread(const AStream: TSocketStream;
-  const AHostMap: TLockedHostMap): TAcceptingThread;
+function CreateAcceptingThread(const AHandshakeHandler: TWebsocketHandshakeHandler):
+TAcceptingThread; inline;
 var
   pool: TAcceptingThreadPool;
 begin
   pool := AcceptingThreadPool.Lock;
   try
     Result := pool.GetObject;
-    Result.Stream := AStream;
-    Result.HostMap := AHostMap;
+    Result.HandshakeHandler := AHandshakeHandler;
     Result.Restart;
   finally
     AcceptingThreadPool.Unlock;
@@ -332,7 +347,7 @@ begin
 end;
 
 function CreateHandlerThread(const ACommunicator: TWebsocketCommunincator;
-  const AHandler: TThreadedWebsocketHandler): TWebsocketHandlerThread;
+  const AHandler: TThreadedWebsocketHandler): TWebsocketHandlerThread; inline;
 var
   pool: THandlerThreadPool;
 begin
@@ -348,7 +363,7 @@ begin
 end;
 
 function CreateRecieverThread(
-  const ACommunicator: TWebsocketCommunincator): TWebsocketRecieverThread;
+  const ACommunicator: TWebsocketCommunincator): TWebsocketRecieverThread; inline;
 var
   pool: TRecieverThreadPool;
 begin
@@ -391,6 +406,11 @@ begin
   Result := CompareStr(Key1.ToLower, Key2.ToLower);
 end;
 
+procedure TAcceptingThread.DoExecute;
+begin
+  FHandshakeHandler.PerformHandshake;
+end;
+
 { TWebsocketHandlerThread }
 
 procedure TWebsocketHandlerThread.DoExecute;
@@ -417,7 +437,7 @@ begin
   FStopped := False;
   while not Terminated and not FStopped and FCommunicator.Open do
   begin
-    FCommunicator.RecieveMessages;
+    FCommunicator.RecieveMessage;
     Yield;
   end;
 end;
@@ -442,7 +462,7 @@ begin
   FStream := AStream;
   FMaskMessages := AMaskMessage;
   FAssumeMaskedMessages := AssumeMaskedMessages;
-  FMessages := TLockedMessageList.Create(TMessageList.Create);
+  FMessages := TLockedWebsocketMessageList.Create(TWebsocketMessageList.Create);
   FOpen := True;
   FExpectClose := False;
 end;
@@ -471,11 +491,11 @@ begin
   FStream.Free;
 end;
 
-procedure TWebsocketCommunincator.RecieveMessages;
+procedure TWebsocketCommunincator.RecieveMessage;
 
   procedure AddMessageToList(Message: TWebsocketMessage);
   var
-    lst: TMessageList;
+    lst: TWebsocketMessageList;
   begin
     if Assigned(Message) then
     begin
@@ -535,9 +555,12 @@ begin
           FStream.ReadBuffer(buffer[0], len);
           if Header.Mask then
           begin
-            for i := 0 to len - 1 do
+            // As this is 64 bit, to be 32 bit compatible we can't use a for loop
+            i := 0;
+            while i < len do
             begin
               buffer[i] := buffer[i] xor MaskRec.Bytes[i mod 4];
+              Inc(i);
             end;
           end;
         end;
@@ -616,9 +639,9 @@ begin
 end;
 
 function TWebsocketCommunincator.GetUnprocessedMessages(
-  const MsgList: TMessageOwnerList): integer;
+  const MsgList: TWebsocketMessageOwnerList): integer;
 var
-  lst: TMessageList;
+  lst: TWebsocketMessageList;
   m: TWebsocketMessage;
 begin
   lst := FMessages.Lock;
@@ -669,9 +692,14 @@ begin
     MaskRec.Key := FMaskKey;
     // First: Transmit mask Key
     FDataStream.WriteBuffer(MaskRec.Bytes[0], 4);
-    // 2. Encode Message
-    for i := 0 to FCurrentLen - 1 do
+    // 2. Encode Message        
+    // As this is 64 bit, to be 32 bit compatible we can't use a for loop
+    i := 0;
+    while i < FCurrentLen do
+    begin
       FBuffer[i] := FBuffer[i] xor MaskRec.Bytes[i mod 4];
+      Inc(i);
+    end;
   end;
   // Write Message payload
   FDataStream.WriteBuffer(FBuffer[0], FCurrentLen);
@@ -847,9 +875,9 @@ begin
   Self.Sorted := True;
 end;
 
-{ TAcceptingThread }
+{ TWebsocketHandshakeHandler }
 
-function TAcceptingThread.ReadRequest(var RequestData: TRequestData): boolean;
+function TWebsocketHandshakeHandler.ReadRequest(var RequestData: TRequestData): boolean;
 var
   method: string;
   proto: string;
@@ -862,15 +890,15 @@ begin
   // Check if this is HTTP by checking the first line
   // Method GET is required
   SetLength(method, 4);
-  Stream.ReadBuffer(method[1], 4);
+  FStream.ReadBuffer(method[1], 4);
   if method <> 'GET ' then
   begin
     // Not GET
     Exit;
   end;
   // Read path and HTTP version
-  Stream.ReadTo(' ', RequestData.Path);
-  Stream.ReadTo(#13#10, proto, 10);
+  FStream.ReadTo(' ', RequestData.Path);
+  FStream.ReadTo(#13#10, proto, 10);
   RequestData.Path := RequestData.Path.TrimRight;
   proto := proto.TrimRight.ToLower;
   if not proto.StartsWith('http/') then
@@ -884,7 +912,7 @@ begin
     Exit;
   end;
   // Headers are separated by 2 newlines (CR+LF)
-  Stream.ReadTo(#13#10#13#10, headerstr, 2048);
+  FStream.ReadTo(#13#10#13#10, headerstr, 2048);
   RequestData.Headers.Parse(headerstr.Trim);
   if not (RequestData.Headers.TryGetData('Upgrade', upg) and
     RequestData.Headers.TryGetData('Connection', conn) and
@@ -902,7 +930,7 @@ begin
   Result := True;
 end;
 
-function TAcceptingThread.GenerateAcceptingKey(const Key: string): string;
+function TWebsocketHandshakeHandler.GenerateAcceptingKey(const Key: string): string;
 var
   concatKey: string;
   keyHash: TSHA1Digest;
@@ -929,7 +957,7 @@ begin
   end;
 end;
 
-procedure TAcceptingThread.DoExecute;
+procedure TWebsocketHandshakeHandler.PerformHandshake;
 var
   RequestData: TRequestData;
   hm: THostMap;
@@ -940,81 +968,94 @@ var
   HandsakeResponse: TStringList;
   Comm: TWebsocketCommunincator;
 begin
-  RequestData.Headers := TRequestHeaders.Create;
   try
-    // Reqding request
+    RequestData.Headers := TRequestHeaders.Create;
     try
-      if not ReadRequest(RequestData) then
-      begin
-        Stream.WriteRaw(MalformedRequestMessage);
-        Stream.Free;
-        Exit;
-      end;
-    except
-      on E: EReadError do
-      begin
-        Stream.WriteRaw(MalformedRequestMessage);
-        Stream.Free;
-        Exit;
-      end;
-    end;
-    // Getting responsible handler
-    hm := FHostMap.Lock;
-    try
-      hh := hm.Objects[RequestData.Host];
-      if not Assigned(hh) then
-      begin
-        Stream.WriteRaw(HandlerNotFoundMessage);
-        Stream.Free;
-        Exit;
-      end;
-      sh := hh.Objects[RequestData.Path];
-      if not Assigned(sh) then
-      begin
-        Stream.WriteRaw(HandlerNotFoundMessage);
-        Stream.Free;
-        Exit;
-      end;
-    finally
-      FHostMap.Unlock;
-    end;
-    // Checking if handler wants to accept
-    ResponseHeaders := TStringList.Create;
-    try
-      ResponseHeaders.NameValueSeparator := ':';
-      if not sh.Accept(RequestData, ResponseHeaders) then
-      begin
-        Stream.WriteRaw(ForbiddenRequestMessage);
-        Stream.Free;
-        Exit;
-      end;
-      // Neseccary headers
-      ResponseHeaders.Values['Connection'] := 'Upgrade';
-      ResponseHeaders.Values['Upgrade'] := 'websocket';
-      ResponseHeaders.Values['Sec-WebSocket-Accept'] :=
-        GenerateAcceptingKey(RequestData.Key);
-      // Generating response
-      HandsakeResponse := TStringList.Create;
+      // Reqding request
       try
-        HandsakeResponse.TextLineBreakStyle := tlbsCRLF;
-        HandsakeResponse.Add('HTTP/1.1 101 Switching Protocols');
-        for i := 0 to ResponseHeaders.Count - 1 do
-          HandsakeResponse.Add('%s: %s'.Format([ResponseHeaders.Names[i],
-            ResponseHeaders.ValueFromIndex[i]]));
-        HandsakeResponse.Add('');
-
-        Stream.WriteRaw(HandsakeResponse.Text);
-        Comm := TWebsocketCommunincator.Create(Stream, False, True);
-        sh.HandleCommunication(Comm);
+        if not ReadRequest(RequestData) then
+        begin
+          FStream.WriteRaw(MalformedRequestMessage);
+          FStream.Free;
+          Exit;
+        end;
+      except
+        on E: EReadError do
+        begin
+          FStream.WriteRaw(MalformedRequestMessage);
+          FStream.Free;
+          Exit;
+        end;
+      end;
+      // Getting responsible handler
+      hm := FHostMap.Lock;
+      try
+        hh := hm.Objects[RequestData.Host];
+        if not Assigned(hh) then
+        begin
+          FStream.WriteRaw(HandlerNotFoundMessage);
+          FStream.Free;
+          Exit;
+        end;
+        sh := hh.Objects[RequestData.Path];
+        if not Assigned(sh) then
+        begin
+          FStream.WriteRaw(HandlerNotFoundMessage);
+          FStream.Free;
+          Exit;
+        end;
       finally
-        HandsakeResponse.Free;
+        FHostMap.Unlock;
+      end;
+      // Checking if handler wants to accept
+      ResponseHeaders := TStringList.Create;
+      try
+        ResponseHeaders.NameValueSeparator := ':';
+        if not sh.Accept(RequestData, ResponseHeaders) then
+        begin
+          FStream.WriteRaw(ForbiddenRequestMessage);
+          FStream.Free;
+          Exit;
+        end;
+        // Neseccary headers
+        ResponseHeaders.Values['Connection'] := 'Upgrade';
+        ResponseHeaders.Values['Upgrade'] := 'websocket';
+        ResponseHeaders.Values['Sec-WebSocket-Accept'] :=
+          GenerateAcceptingKey(RequestData.Key);
+        // Generating response
+        HandsakeResponse := TStringList.Create;
+        try
+          HandsakeResponse.TextLineBreakStyle := tlbsCRLF;
+          HandsakeResponse.Add('HTTP/1.1 101 Switching Protocols');
+          for i := 0 to ResponseHeaders.Count - 1 do
+            HandsakeResponse.Add('%s: %s'.Format([ResponseHeaders.Names[i],
+              ResponseHeaders.ValueFromIndex[i]]));
+          HandsakeResponse.Add('');
+
+          FStream.WriteRaw(HandsakeResponse.Text);
+        finally
+          HandsakeResponse.Free;
+        end;
+      finally
+        ResponseHeaders.Free;
       end;
     finally
-      ResponseHeaders.Free;
+      RequestData.Headers.Free;
     end;
+    Comm := TWebsocketCommunincator.Create(FStream, False, True);
   finally
-    RequestData.Headers.Free;
+    // Not needed anymore, we can now die in piece.
+    // All information requier for the rest is now on the stack
+    Self.Free;
   end;
+  sh.HandleCommunication(Comm);
+end;
+
+constructor TWebsocketHandshakeHandler.Create(AStream: TSocketStream;
+  AHostMap: TLockedHostMap);
+begin
+  FHostMap := AHostMap;
+  FStream := AStream;
 end;
 
 { TWebSocketServer }
@@ -1024,11 +1065,29 @@ begin
   FSocket.OnConnect := @HandleConnect;
   FHostMap := TLockedHostMap.Create;
   FFreeHandlers := True;
+  FAcceptingMethod := samDefault;
 end;
 
 procedure TWebSocketServer.HandleConnect(Sender: TObject; Data: TSocketStream);
+var
+  HandshakeHandler: TWebsocketHandshakeHandler;
+  t: TAcceptingThread;
 begin
-  CreateAcceptingThread(Data, FHostMap);
+  HandshakeHandler := TWebsocketHandshakeHandler.Create(Data, FHostMap);
+  case AcceptingMethod of
+    samDefault:
+      HandshakeHandler.PerformHandshake;
+    samThreaded:
+    begin
+      t := TAcceptingThread.Create(True);
+      t.DoTerminate := True;
+      t.FreeOnTerminate := True;
+      t.HandshakeHandler := HandshakeHandler;
+      t.Restart;
+    end;
+    samThreadPool:
+      CreateAcceptingThread(HandshakeHandler);
+  end;
 end;
 
 procedure TWebSocketServer.Start;

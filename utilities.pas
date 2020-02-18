@@ -44,6 +44,7 @@ type
 
   TPoolableThread = class(TThread)
   private
+    FDoTerminate: boolean;
     FIsIdle: boolean;
   protected
     procedure DoExecute; virtual;
@@ -53,6 +54,7 @@ type
       const StackSize: SizeUInt = DefaultStackSize);
     procedure Restart; virtual;
     property isIdle: boolean read FIsIdle;
+    property DoTerminate: boolean read FDoTerminate write FDoTerminate;
   end;
 
   { TPoolableThreadFactory }
@@ -403,12 +405,16 @@ begin
       TThread.Yield;
     end;
     DoExecute;
-    FIsIdle := True;
+    if FDoTerminate then
+      self.Terminate
+    else
+      FIsIdle := True;
   end;
 end;
 
 constructor TPoolableThread.Create(CreateSuspended: boolean; const StackSize: SizeUInt);
 begin
+  FDoTerminate := False;
   if CreateSuspended then
     FIsIdle := True
   else
