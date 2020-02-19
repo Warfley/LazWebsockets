@@ -35,14 +35,17 @@ type
     FLocalAddress: TNetAddress;
     FRemoteAddress: TNetAddress;
     FStream: TSocketStream;
-    FLock: TRTLCriticalSection;
+    FReadLock: TRTLCriticalSection;
+    FWriteLock: TRTLCriticalSection;
     function isOpen: boolean;
   public
     constructor Create(const AStream: TSocketStream);
     destructor Destroy; override;
 
-    function Lock: TSocketStream;
-    procedure Unlock;
+    function LockRead: TSocketStream;
+    procedure UnlockRead;
+    function LockWrite: TSocketStream;
+    procedure UnlockWrite;
     procedure CloseStream;
     property Open: boolean read isOpen;
     property RemoteAddress: TNetAddress read FRemoteAddress;
@@ -188,12 +191,10 @@ end;
 
 function TLockedSocketStream.isOpen: boolean;
 begin
-  Lock;
-  try
-    Result := Assigned(FStream);
-  finally
-    Unlock;
-  end;
+  // Simply reading don't need locks
+  // If you want to do anything afterwards you still need to lock and check if
+  // the stream is assigned
+  Result := Assigned(FStream);
 end;
 
 constructor TLockedSocketStream.Create(const AStream: TSocketStream);
@@ -203,34 +204,52 @@ begin
   FRemoteAddress.Address := NetAddrToStr(AStream.RemoteAddress.sin_addr);
   FRemoteAddress.Port := AStream.LocalAddress.sin_port;
   FStream := AStream;
-  InitCriticalSection(FLock);
+  InitCriticalSection(FReadLock);
+  InitCriticalSection(FWriteLock);
 end;
 
 destructor TLockedSocketStream.Destroy;
 begin
   CloseStream;
-  DoneCriticalsection(FLock);
+  DoneCriticalsection(FWriteLock);
+  DoneCriticalsection(FReadLock);
   inherited Destroy;
 end;
 
-function TLockedSocketStream.Lock: TSocketStream;
+function TLockedSocketStream.LockRead: TSocketStream;
 begin
-  EnterCriticalsection(FLock);
+  EnterCriticalsection(FReadLock);
   Result := FStream;
 end;
 
-procedure TLockedSocketStream.Unlock;
+procedure TLockedSocketStream.UnlockRead;
 begin
-  LeaveCriticalsection(FLock);
+  LeaveCriticalsection(FReadLock);
+end;     
+
+function TLockedSocketStream.LockWrite: TSocketStream;
+begin
+  EnterCriticalsection(FWriteLock);
+  Result := FStream;
+end;
+
+procedure TLockedSocketStream.UnlockWrite;
+begin
+  LeaveCriticalsection(FWriteLock);
 end;
 
 procedure TLockedSocketStream.CloseStream;
 begin
-  Lock;
+  LockRead;
   try
-    FreeAndNil(FStream);
+    LockWrite;
+    try
+      FreeAndNil(FStream);
+    finally
+      UnlockWrite;
+    end;
   finally
-    Unlock;
+    UnlockRead;
   end;
 end;
 
@@ -306,7 +325,7 @@ procedure TWebsocketCommunincator.RecieveMessage;
         ToRead := LeftToRead;
       // Reading
 
-      Stream := FStream.Lock;
+      Stream := FStream.LockRead;
       try
         if not Assigned(Stream) then
         begin
@@ -332,7 +351,7 @@ procedure TWebsocketCommunincator.RecieveMessage;
           Stream.IOTimeout := oldTO;
         end;
       finally
-        FStream.Unlock;
+        FStream.UnlockRead;
       end;
       if (TotalRead < len) and (Read <> ToRead) then // not finished, wait for some data
         Sleep(WaitingTime);
@@ -546,7 +565,7 @@ const
   ConnectionIsDeadCode = {$IfDef UNIX}0{$ELSE}10053{$ENDIF};
 begin
   try
-    Stream := FCommunicator.SocketStream.Lock;
+    Stream := FCommunicator.SocketStream.LockWrite;
     try
       if not Assigned(Stream) then
       begin
@@ -600,7 +619,7 @@ begin
           raise EWebsocketWriteError.Create(e.Message, Stream.LastError);
       end;
     finally
-      FCommunicator.SocketStream.Unlock;
+      FCommunicator.SocketStream.UnlockWrite;
     end;
   except
     on E: EWebsocketWriteError do
