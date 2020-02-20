@@ -1,5 +1,5 @@
-# LazWebsocketsServer
-This provides a small Websocket server implementation written for the FPC and Lazarus. 
+# LazWebsockets
+This provides a small Websocket server and client implementation written for the FPC and Lazarus. 
 It is fully based upon the fcl `ssockets` unit and therefore independent from any additional dependencies except from the FCL.
 It can thereby easiely built only using fpc without Lazarus or complicated makefiles.
 
@@ -7,7 +7,7 @@ It can thereby easiely built only using fpc without Lazarus or complicated makef
 There is a Lazarus package file (`websockets.lpk`) in this repository that can be used for Lazarus projects. An other option is to simply add the `src` directory to your unit search path.
 
 ## Usage & Functionality
-For a simple example server see the `chatServer.pas` in the examples directory.
+For a simple example server see the `chatServer.pas` and `chatClient.pas` in the examples directory.
 ### Setting up the Server
 To create a `TWebSocketServer` the constructor mirrors the constructor of `ssockets.TInetServer` and can be called with either only a port, or an address, port and optionally a `ssockets.TSocketHandler` (e.g. to provide TLS support).
 So in order to create a simple WebSocket listener on port 8080 we can simply use:
@@ -57,6 +57,22 @@ The last step now is to simply start our server with
 ```
 It will then start accepting clients on this thread until `Server.Stop` is called.
 
+### Setting up the Client
+To establish a client connection the class `TWebsocketClient` is provided. Its constructor takes three parameters, the `Host` and optionally `Port` and `Path`. If these are not given the default (port 80 and path /) will be used. These can be changed afterwards through their respective properties.
+
+To establish the connection then simply call
+```
+function Connect(AHandler: TSocketHandler = nil): TWebsocketCommunincator;
+```
+
+Besides those the class also provides a few properties:
+```
+property CustomHeaders: TStrings;
+property OnHandshakeSuccess: TWebsocketHandshakeResponseEvent;
+property OnHandshakeFailure: TWebsocketHandshakeResponseEvent;
+```
+`CustomHeaders` can be used to add headers to the HTTP handshake, e.g. an authorization header. The two events are triggered after the handshake, on success or failure respectively. The events get some information about the server response passed, this includes the headers (e.g. for recieving cookies), but also the content and statuscode, in case of a failure (e.g. to check against 404 or 403).
+
 ### Recieving and Sending Messages
 All the communication is done via the `TWebsocketCommunincator` class. It provides three basic methods for communication:
 ```
@@ -86,8 +102,10 @@ property OnClose: TNotifyEvent;
 `OnRecieveMessage` is triggered when `RecieveMessages` adds a new message to the message queue and `OnClose` will be triggered when the stream closes, either due to an abrupt disconnect of the underlying TCP stream (detected by a stream reding error while recieving Messages) or after sending the close message. It will be called before the `TSocketStream` object will be destroyed, so you still have access to it, e.g. to its `RemoteAddress` attribute to identify the client. Both of these events are fired in the context of the thread discovering them, most likely the thread calling `RecieveMessages`. Any cross thread accesses need to be secured by the user, either using `TThread.Queue`, `TThread.Synchronize`, `critical sections` or any other method of handling inter-thread communications.
 
 ## Example
-The `chatServer` example can be built in multiple ways. Either by opening the Lazarus project (`examples/chatServer.lpi`) and building it with the IDE, or by using make in the examples directory, or by using the fpc directly via:
+The `chatServer` example can be built in multiple ways. Either by opening the Lazarus project (`examples/chatServer.lpi` and `examples/chatClient.lpi`) and building it with the IDE, or by using `make` in the examples directory, or by calling the fpc directly via:
 ```
-$> fpc -Fu ../src chatServer.pas
+$> fpc -Fu../src chatServer.pas
+$> fpc -Fu../src chatClient.pas
 ```
-The client for this is the html document `chatClient.html` and should be usable with any modern browser. The example is a simple chat that lets the user input text messages to send to the other party, and recieve their messages asynchronously. You can try to connect with multiple clients at once to the server as it uses a threaded handler, but isn't built for reading more than a message for one client at a time, so funny things might happen.
+An alternative JavaScript based client for the server can be found in the html document `chatClient.html` and should be usable with any modern browser. The example is a simple chat that lets the user input text messages to send to the other party, and recieve their messages asynchronously. You can try to connect with multiple clients at once to the server as it uses a threaded handler, but isn't built for reading more than a message for one client at a time, so funny things might happen.
+The `chatClient.pas` example can also send special codes: by typing `exit` the connection will be closed gracefully and with `ping message` a ping with `message` as content can be sent.
