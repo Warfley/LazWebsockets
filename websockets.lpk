@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
-  <Package Version="5">
-    <Name Value="Websockets"/>
+  <Package Version="4">
+    <PathDelim Value="\"/>
+    <Name Value="websockets"/>
     <Type Value="RunAndDesignTime"/>
     <CompilerOptions>
       <Version Value="11"/>
+      <PathDelim Value="\"/>
       <SearchPaths>
         <OtherUnitFiles Value="src"/>
-        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)\"/>
       </SearchPaths>
       <CodeGeneration>
-        <SmartLinkUnit Value="True"/>
         <Optimizations>
           <OptimizationLevel Value="3"/>
         </Optimizations>
@@ -21,28 +22,32 @@
         </Debugging>
       </Linking>
     </CompilerOptions>
-    <Files>
-      <Item>
-        <Filename Value="src/websocketserver.pas"/>
+    <Files Count="5">
+      <Item1>
+        <Filename Value="src\websocketsclient.pas"/>
+        <UnitName Value="WebsocketsClient"/>
+      </Item1>
+      <Item2>
+        <Filename Value="src\websocketserver.pas"/>
         <UnitName Value="WebSocketServer"/>
-      </Item>
-      <Item>
-        <Filename Value="src/wsutils.pas"/>
-        <UnitName Value="wsutils"/>
-      </Item>
-      <Item>
-        <Filename Value="src/wsmessages.pas"/>
+      </Item2>
+      <Item3>
+        <Filename Value="src\wsmessages.pas"/>
         <UnitName Value="wsmessages"/>
-      </Item>
-      <Item>
-        <Filename Value="src/wsstream.pas"/>
+      </Item3>
+      <Item4>
+        <Filename Value="src\wsstream.pas"/>
         <UnitName Value="wsstream"/>
-      </Item>
+      </Item4>
+      <Item5>
+        <Filename Value="src\wsutils.pas"/>
+        <UnitName Value="wsutils"/>
+      </Item5>
     </Files>
-    <RequiredPkgs>
-      <Item>
+    <RequiredPkgs Count="1">
+      <Item1>
         <PackageName Value="FCL"/>
-      </Item>
+      </Item1>
     </RequiredPkgs>
     <UsageOptions>
       <UnitPath Value="$(PkgOutDir)"/>

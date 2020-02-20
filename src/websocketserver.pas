@@ -5,23 +5,15 @@ unit WebSocketServer;
 interface
 
 uses
-  Classes, SysUtils, ssockets, fgl, sha1, base64, wsutils, wsstream;
+  Classes, SysUtils, ssockets, fgl, wsutils, wsstream;
 
 type
-
-  { TRequestHeaders }
-
-  TRequestHeaders = class(specialize TFPGMap<string, string>)
-  public
-    procedure Parse(const HeaderString: string);
-    constructor Create;
-  end;
 
   TRequestData = record
     Host: string;
     Path: string;
     Key: string;
-    Headers: TRequestHeaders;
+    Headers: THttpHeader;
   end;
 
   { TWebsocketHandler }
@@ -151,7 +143,6 @@ type
     FStream: TSocketStream;
     FHostMap: TLockedHostMap;
     function ReadRequest(var RequestData: TRequestData): boolean;
-    function GenerateAcceptingKey(const Key: string): string;
   public
     procedure PerformHandshake;
     constructor Create(AStream: TSocketStream; AHostMap: TLockedHostMap);
@@ -225,14 +216,6 @@ begin
   end;
 end;
 
-{ TRequestHeaders }
-
-function DoHeaderKeyCompare(const Key1, Key2: string): integer;
-begin
-  // Headers are case insensetive
-  Result := CompareStr(Key1.ToLower, Key2.ToLower);
-end;
-
 { TWebsocketHandlerThread }
 
 procedure TWebsocketHandlerThread.DoExecute;
@@ -250,7 +233,7 @@ begin
   finally
     Recv.Kill;
   end;
-end;   
+end;
 
 procedure TAcceptingThread.DoExecute;
 begin
@@ -327,36 +310,6 @@ begin
   inherited Create(THostMap.Create);
 end;
 
-procedure TRequestHeaders.Parse(const HeaderString: string);
-var
-  sl: TStringList;
-  s: string;
-  p: integer;
-begin
-  sl := TStringList.Create;
-  try
-    sl.TextLineBreakStyle := tlbsCRLF;
-    sl.Text := HeaderString;
-    for s in sl do
-    begin
-      // Use sl.Values instead?
-      p := s.IndexOf(':');
-      if p > 0 then
-        Self.KeyData[s.Substring(0, p).ToLower] := s.Substring(p + 1).Trim;
-    end;
-  finally
-    sl.Free;
-  end;
-end;
-
-constructor TRequestHeaders.Create;
-begin
-  inherited Create;
-  Self.OnKeyCompare := @DoHeaderKeyCompare;
-  // Binary search => faster access
-  Self.Sorted := True;
-end;
-
 { TWebsocketHandshakeHandler }
 
 function TWebsocketHandshakeHandler.ReadRequest(var RequestData: TRequestData): boolean;
@@ -395,7 +348,7 @@ begin
   end;
   // Headers are separated by 2 newlines (CR+LF)
   FStream.ReadTo(#13#10#13#10, headerstr, 2048);
-  RequestData.Headers.Parse(headerstr.Trim);
+  RequestData.Headers.Parse(headerstr.TrimRight);
   if not (RequestData.Headers.TryGetData('Upgrade', upg) and
     RequestData.Headers.TryGetData('Connection', conn) and
     RequestData.Headers.TryGetData('Sec-WebSocket-Key', RequestData.Key) and
@@ -412,32 +365,6 @@ begin
   Result := True;
 end;
 
-function TWebsocketHandshakeHandler.GenerateAcceptingKey(const Key: string): string;
-var
-  concatKey: string;
-  keyHash: TSHA1Digest;
-  OutputStream: TStringStream;
-  b64Encoder: TBase64EncodingStream;
-const
-  WebsocketMagicString = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-begin
-  // Key = Base64(SHA1(Key + MagicString))
-  concatKey := Key + WebsocketMagicString;
-  keyHash := SHA1String(concatKey);
-  OutputStream := TStringStream.Create('');
-  try
-    b64Encoder := TBase64EncodingStream.Create(OutputStream);
-    try
-      b64Encoder.WriteBuffer(keyHash[low(keyHash)], Length(keyHash));
-      b64Encoder.Flush;
-      Result := OutputStream.DataString;
-    finally
-      b64Encoder.Free;
-    end;
-  finally
-    OutputStream.Free;
-  end;
-end;
 
 procedure TWebsocketHandshakeHandler.PerformHandshake;
 var
@@ -451,7 +378,7 @@ var
   Comm: TWebsocketCommunincator;
 begin
   try
-    RequestData.Headers := TRequestHeaders.Create;
+    RequestData.Headers := THttpHeader.Create;
     try
       // Reqding request
       try

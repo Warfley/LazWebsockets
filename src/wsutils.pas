@@ -7,7 +7,15 @@ interface
 uses
   Classes, SysUtils, gvector, fgl;
 
-type
+type    
+
+  { THttpHeader }
+
+  THttpHeader = class(specialize TFPGMap<string, string>)
+  public
+    procedure Parse(const HeaderString: string);
+    constructor Create;
+  end;
 
   { TThreadedObject }
 
@@ -71,6 +79,7 @@ type
 
   TStreamHelper = class helper for TStream
   public
+    function ReadRaw(const Count: Integer): String;
     procedure ReadTo(const pattern: string; out Result: string; MaxLen: integer = 1024);
     procedure WriteRaw(const Data: string);
   end;
@@ -100,7 +109,45 @@ type
     property Objects[const AKey: string]: T read GetObject write SetObject; default;
   end;
 
-implementation
+implementation 
+
+{ THttpHeader }
+
+function DoHeaderKeyCompare(const Key1, Key2: string): integer;
+begin
+  // Headers are case insensetive
+  Result := CompareStr(Key1.ToLower, Key2.ToLower);
+end;
+
+procedure THttpHeader.Parse(const HeaderString: string);
+var
+  sl: TStringList;
+  s: string;
+  p: integer;
+begin
+  sl := TStringList.Create;
+  try
+    sl.TextLineBreakStyle := tlbsCRLF;
+    sl.Text := HeaderString;
+    for s in sl do
+    begin
+      // Use sl.Values instead?
+      p := s.IndexOf(':');
+      if p > 0 then
+        Self.KeyData[s.Substring(0, p).ToLower] := s.Substring(p + 1).Trim;
+    end;
+  finally
+    sl.Free;
+  end;
+end;
+
+constructor THttpHeader.Create;
+begin
+  inherited Create;
+  Self.OnKeyCompare := @DoHeaderKeyCompare;
+  // Binary search => faster access
+  Self.Sorted := True;
+end;
 
 { TStringObjectMap }
 
@@ -201,9 +248,16 @@ end;
 procedure TThreadedObject.Unlock;
 begin
   LeaveCriticalsection(FLock);
-end;
+end;        
 
 { TStreamHelper }
+
+function TStreamHelper.ReadRaw(const Count: Integer): String;
+begin
+  if Count <= 0 then Exit;
+  SetLength(Result, Count);
+  ReadBuffer(Result[1], Count);
+end;
 
 {* -----------------------------------------------------------------------------
  * Reads a stream until a pattern is found, maxlen is reached or an exception
@@ -218,7 +272,8 @@ var
   len: integer;
   pLen: integer;
   backtrack: integer;
-begin
+begin  
+  if MaxLen <= 0 then Exit;
   SetLength(Result, 128);
   len := 0;
   plen := 0;
@@ -267,6 +322,7 @@ end;
  * ----------------------------------------------------------------------------}
 procedure TStreamHelper.WriteRaw(const Data: string);
 begin
+  if Data.Length = 0 then Exit;
   self.WriteBuffer(Data[1], Data.Length);
 end;
 

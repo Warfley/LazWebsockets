@@ -5,7 +5,7 @@ unit wsstream;
 interface
 
 uses
-  Classes, SysUtils, ssockets, wsmessages, Sockets;
+  Classes, SysUtils, ssockets, wsmessages, Sockets, base64, sha1;
 
 type
 
@@ -64,13 +64,14 @@ type
     FBuffer: TBytes;
     FCurrentLen: int64;
     FFirstWrite: boolean;
-    FMaskKey: integer;
+    FDoMask: Boolean;
 
+    function GenerateMask: Cardinal;
     procedure WriteDataFrame(Finished: boolean = False);
   public
     constructor Create(const ACommunicator: TWebsocketCommunincator;
       AMessageType: TWebsocketMessageType; AMaxFrameLen: int64;
-  AMaskKey: integer);
+  ADoMask: Boolean);
     destructor Destroy; override;
     function Seek(Offset: longint; Origin: word): longint; override;
     function Read(var Buffer; Count: longint): longint; override;
@@ -88,7 +89,6 @@ type
     FOnRecieveMessage: TNotifyEvent;
     FOnClose: TNotifyEvent;
     FExpectClose: boolean;
-    function GenerateMask: integer;
     function GetOpen: boolean;
   public
     constructor Create(AStream: TLockedSocketStream; AMaskMessage: boolean;
@@ -109,8 +109,14 @@ type
     property SocketStream: TLockedSocketStream read FStream;
     property Open: boolean read GetOpen;
   end;
-
+  
+function GenerateAcceptingKey(const Key: string): string; inline;
 implementation
+const
+  // Fixme check if it is really 0 on unix
+  ConnectionRestCode = {$IfDef UNIX}0{$ELSE}10054{$ENDIF};
+  ConnectionIsDeadCode = {$IfDef UNIX}0{$ELSE}10053{$ENDIF};
+
 {*------------------------------------------------------------------------------
  * extension of htons and htonl for qwords (ll: long long from C)
  *-----------------------------------------------------------------------------}
@@ -144,7 +150,7 @@ type
   TMaskRec = record
     case boolean of
       True: (Bytes: array[0..3] of byte);
-      False: (Key: integer);
+      False: (Key: Cardinal);
   end;
   TWordRec = record
     case boolean of
@@ -254,13 +260,6 @@ begin
 end;
 
 { TWebsocketCommunincator }
-
-function TWebsocketCommunincator.GenerateMask: integer;
-begin
-  Result := -1;
-  if FMaskMessages then // Not really secure...
-    Result := integer(Random(DWord.MaxValue));
-end;
 
 function TWebsocketCommunincator.GetOpen: boolean;
 begin
@@ -519,7 +518,8 @@ begin
   except
     On e: EWebsocketReadError do
     begin
-      if e.Code = 0 then
+      if (e.Code = 0) or (e.Code = ConnectionIsDeadCode) or
+         (e.Code = ConnectionRestCode) then
       begin
         // Stream has been closed
         Close(True);
@@ -532,7 +532,7 @@ function TWebsocketCommunincator.WriteMessage(MessageType: TWebsocketMessageType
   MaxFrameLength: int64): TWebsocketMessageStream;
 begin
   Result := TWebsocketMessageStream.Create(Self, MessageType,
-    MaxFrameLength, generateMask);
+    MaxFrameLength, FMaskMessages);
 end;
 
 function TWebsocketCommunincator.GetUnprocessedMessages(
@@ -554,15 +554,17 @@ end;
 
 { TWebsocketMessageStream }
 
+function TWebsocketMessageStream.GenerateMask: Cardinal;
+begin
+  Result := Random(Cardinal.MaxValue + 1);
+end;
+
 procedure TWebsocketMessageStream.WriteDataFrame(Finished: boolean);
 var
   Header: TWebsocketFrameHeader;
   i: int64;
   MaskRec: TMaskRec;
   Stream: TSocketStream;
-const
-  // FIXME: check if this is the real unix code
-  ConnectionIsDeadCode = {$IfDef UNIX}0{$ELSE}10053{$ENDIF};
 begin
   try
     Stream := FCommunicator.SocketStream.LockWrite;
@@ -573,7 +575,7 @@ begin
       end;
       try
         Header.Fin := Finished;
-        Header.Mask := (FMaskKey <> -1);
+        Header.Mask := FDoMask;
         if FFirstWrite then
           Header.OPCode := FMessageType
         else
@@ -598,9 +600,9 @@ begin
         if Header.Mask then
         begin
           // If we use a mask
-          MaskRec.Key := FMaskKey;
+          MaskRec.Key := generateMask;
           // First: Transmit mask Key
-          Stream.WriteBuffer(MaskRec.Bytes[0], 4);
+          Stream.WriteBuffer(MaskRec.Key, SizeOf(MaskRec.Key));
           // 2. Encode Message
           // As this is 64 bit, to be 32 bit compatible we can't use a for loop
           i := 0;
@@ -610,8 +612,11 @@ begin
             Inc(i);
           end;
         end;
-        // Write Message payload
-        Stream.WriteBuffer(FBuffer[0], FCurrentLen);
+        if FCurrentLen > 0 then
+        begin
+          // Write Message payload
+          Stream.WriteBuffer(FBuffer[0], FCurrentLen);
+        end;
         // Reset state for next data
         FCurrentLen := 0;
       except
@@ -624,15 +629,17 @@ begin
   except
     on E: EWebsocketWriteError do
     begin
-      if E.Code = ConnectionIsDeadCode then
+      if (e.Code = 0) or (e.Code = ConnectionIsDeadCode) or
+         (e.Code = ConnectionRestCode) then
         FCommunicator.Close(True);
       raise;
     end;
   end;
 end;
 
-constructor TWebsocketMessageStream.Create(const ACommunicator: TWebsocketCommunincator;
-  AMessageType: TWebsocketMessageType; AMaxFrameLen: int64; AMaskKey: integer);
+constructor TWebsocketMessageStream.Create(
+  const ACommunicator: TWebsocketCommunincator;
+  AMessageType: TWebsocketMessageType; AMaxFrameLen: int64; ADoMask: Boolean);
 begin
   FCommunicator := ACommunicator;
   FMaxFrameSize := AMaxFrameLen;
@@ -640,7 +647,7 @@ begin
   SetLength(FBuffer, AMaxFrameLen);
   FCurrentLen := 0;
   FFirstWrite := True;
-  FMaskKey := AMaskKey;
+  FDoMask := ADoMask;
 end;
 
 destructor TWebsocketMessageStream.Destroy;
@@ -682,6 +689,35 @@ begin
   Result := Count;
 end;
 
+function GenerateAcceptingKey(const Key: string): string; inline;
+var
+  concatKey: string;
+  keyHash: TSHA1Digest;
+  OutputStream: TStringStream;
+  b64Encoder: TBase64EncodingStream;
+const
+  WebsocketMagicString = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+begin
+  // Key = Base64(SHA1(Key + MagicString))
+  concatKey := Key + WebsocketMagicString;
+  keyHash := SHA1String(concatKey);
+  OutputStream := TStringStream.Create('');
+  try
+    b64Encoder := TBase64EncodingStream.Create(OutputStream);
+    try
+      b64Encoder.WriteBuffer(keyHash[low(keyHash)], Length(keyHash));
+      b64Encoder.Flush;
+      Result := OutputStream.DataString;
+    finally
+      b64Encoder.Free;
+    end;
+  finally
+    OutputStream.Free;
+  end;
+end;
+
+initialization
+  Randomize;
 
 end.
 
