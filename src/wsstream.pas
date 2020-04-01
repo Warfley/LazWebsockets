@@ -101,7 +101,7 @@ type
     function GetUnprocessedMessages(const MsgList: TWebsocketMessageOwnerList): integer;
 
     function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
-      MaxFrameLength: int64 = 125): TWebsocketMessageStream;
+      MaxFrameLength: int64 = Word.MaxValue): TWebsocketMessageStream;
 
     property OnRecieveMessage: TNotifyEvent read FOnRecieveMessage
       write FOnRecieveMessage;
