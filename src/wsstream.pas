@@ -101,7 +101,7 @@ type
     function GetUnprocessedMessages(const MsgList: TWebsocketMessageOwnerList): integer;
 
     function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
-      MaxFrameLength: int64 = 125): TWebsocketMessageStream;
+      MaxFrameLength: int64 = word.MaxValue-2): TWebsocketMessageStream;
 
     property OnRecieveMessage: TNotifyEvent read FOnRecieveMessage
       write FOnRecieveMessage;
@@ -583,10 +583,11 @@ begin
         // Compute size
         if FCurrentLen < 126 then
           Header.PayloadLen := FCurrentLen
-        else if FCurrentLen <= word.MaxValue then
+        else
+          if FCurrentLen <= word.MaxValue then
           Header.PayloadLen := 126
         else
-          Header.PayloadLen := 127;
+          Header.PayloadLen := word.MaxValue;        
         // Write header
         Stream.WriteWord(FrameHEaderToWord(Header));
         // Write size if it exceeds 125
