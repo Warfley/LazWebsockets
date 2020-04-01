@@ -672,21 +672,25 @@ function TWebsocketMessageStream.Write(const Buffer; Count: longint): longint;
 var
   ToWrite: integer;
 begin
+  // FIXME: Result is longint but FMaxFrameSize is int64, so technically this
+  // function does not fully support 64 bit messages
+  Result := 0;
   while FCurrentLen + Count > FMaxFrameSize do
   begin
     // Doesn't fit into one dataframe
     // So we split it up into multiple
     ToWrite := FMaxFrameSize - FCurrentLen;
-    Move(Buffer, FBuffer[FCurrentLen], ToWrite);
+    Move(PByte(@Buffer)[Result], FBuffer[FCurrentLen], ToWrite);
     FCurrentLen := FMaxFrameSize;
     WriteDataFrame(False);
     // Now FCurrentLen should be 0 again
     // Only decrese the count
     Dec(Count, ToWrite);
+    Inc(Result, ToWrite);
   end;
-  Move(Buffer, FBuffer[FCurrentLen], Count);
+  Move(PByte(@Buffer)[Result], FBuffer[FCurrentLen], Count);
   FCurrentLen += Count;
-  Result := Count;
+  Inc(Result, Count);
 end;
 
 function GenerateAcceptingKey(const Key: string): string; inline;
