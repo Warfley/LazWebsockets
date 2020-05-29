@@ -458,7 +458,8 @@ begin
     begin
       if Self.Terminated then
         Exit;
-      TThread.Yield;
+      //TThread.Yield;
+      Sleep(0);
     end;
     DoExecute;
     if FDoTerminate then
