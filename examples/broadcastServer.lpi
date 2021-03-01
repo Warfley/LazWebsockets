@@ -2,7 +2,6 @@
 <CONFIG>
   <ProjectOptions>
     <Version Value="11"/>
-    <PathDelim Value="\"/>
     <General>
       <Flags>
         <MainUnitHasCreateFormStatements Value="False"/>
@@ -11,7 +10,7 @@
       </Flags>
       <SessionStorage Value="InProjectDir"/>
       <MainUnit Value="0"/>
-      <Title Value="chatServer"/>
+      <Title Value="broadcastServer"/>
       <UseAppBundle Value="False"/>
       <ResourceType Value="res"/>
     </General>
@@ -26,40 +25,43 @@
       <FormatVersion Value="2"/>
       <Modes Count="0"/>
     </RunParams>
-    <Units Count="5">
+    <Units Count="6">
       <Unit0>
-        <Filename Value="chatServer.pas"/>
+        <Filename Value="broadcastServer.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit0>
       <Unit1>
-        <Filename Value="..\src\websocketserver.pas"/>
+        <Filename Value="../src/websocketsclient.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="WebSocketServer"/>
       </Unit1>
       <Unit2>
-        <Filename Value="..\src\wsmessages.pas"/>
+        <Filename Value="../src/websocketserver.pas"/>
         <IsPartOfProject Value="True"/>
+        <UnitName Value="WebSocketServer"/>
       </Unit2>
       <Unit3>
-        <Filename Value="..\src\wsstream.pas"/>
+        <Filename Value="../src/wsmessages.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit3>
       <Unit4>
-        <Filename Value="..\src\wsutils.pas"/>
+        <Filename Value="../src/wsstream.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit4>
+      <Unit5>
+        <Filename Value="../src/wsutils.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit5>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
     <Version Value="11"/>
-    <PathDelim Value="\"/>
     <Target>
-      <Filename Value="bin\chatServer"/>
+      <Filename Value="bin/broadcastServer"/>
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="..\src"/>
-      <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+      <OtherUnitFiles Value="../src"/>
+      <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
   </CompilerOptions>
   <Debugging>

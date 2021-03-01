@@ -48,12 +48,7 @@ var
       ReadLn(str);
       if not ACommunication.Open then
         Break; // could be closed by the time ReadLn takes
-      with ACommunication.WriteMessage do
-        try
-          WriteRaw(str);
-        finally
-          Free;
-        end;
+      ACommunication.WriteStringMessage(str);
       WriteLn('Message to ', ACommunication.SocketStream.RemoteAddress.Address,
         ': ', str);
     end;

@@ -102,6 +102,10 @@ type
 
     function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
       MaxFrameLength: int64 = Word.MaxValue): TWebsocketMessageStream;
+    procedure WriteRawMessage(const AMessage; ALength: SizeInt;
+      AMessageType: TWebsocketMessageType = wmtString); inline;
+    procedure WriteStringMessage(const AMessage: String); inline;
+    procedure WriteBinaryMessage(const AMessage: TBytes); inline;
 
     property OnRecieveMessage: TNotifyEvent read FOnRecieveMessage
       write FOnRecieveMessage;
@@ -533,6 +537,27 @@ function TWebsocketCommunincator.WriteMessage(MessageType: TWebsocketMessageType
 begin
   Result := TWebsocketMessageStream.Create(Self, MessageType,
     MaxFrameLength, FMaskMessages);
+end;
+
+procedure TWebsocketCommunincator.WriteRawMessage(const AMessage;
+  ALength: SizeInt; AMessageType: TWebsocketMessageType);
+begin
+  with WriteMessage(AMessageType, ALength) do
+  try
+    Write(AMessage, ALength);
+  finally
+    Free;
+  end;
+end;
+
+procedure TWebsocketCommunincator.WriteStringMessage(const AMessage: String);
+begin
+  WriteRawMessage(AMessage[1], AMessage.Length);
+end;
+
+procedure TWebsocketCommunincator.WriteBinaryMessage(const AMessage: TBytes);
+begin
+  WriteRawMessage(AMessage[0], Length(AMessage), wmtBinary);
 end;
 
 function TWebsocketCommunincator.GetUnprocessedMessages(

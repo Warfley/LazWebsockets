@@ -16,19 +16,31 @@ type
     Headers: THttpHeader;
   end;
 
+  TConnectionList = class(specialize TFPGObjectList<TWebsocketCommunincator>);
+  TThreadedConnectionList = class(specialize TThreadedObject<TConnectionList>);
+
   { TWebsocketHandler }
 
   TWebsocketHandler = class
+  private
+    FConnections: TThreadedConnectionList;
   public
+    constructor Create;
+    destructor Destroy; override;
+
     function Accept(const ARequest: TRequestData;
       const ResponseHeaders: TStrings): boolean; virtual;
     procedure HandleCommunication(ACommunicator: TWebsocketCommunincator); virtual;
+    procedure PrepareCommunication(ACommunicator: TWebsocketCommunincator); virtual;
+    procedure DoHandleCommunication(ACommunicator: TWebsocketCommunincator); virtual;
+    procedure FinalizeCommunication(ACommunicator: TWebsocketCommunincator); virtual;
+
+    property Connections: TThreadedConnectionList read FConnections;
   end;
 
   TThreadedWebsocketHandler = class(TWebsocketHandler)
   public
     procedure HandleCommunication(ACommunicator: TWebsocketCommunincator); override;
-    procedure DoHandleCommunication(ACommunication: TWebsocketCommunincator); virtual;
   end;
 
   { THostHandler }
@@ -225,10 +237,10 @@ begin
   Recv := CreateRecieverThread(FCommunicator);
   try
     try
+      FHandler.PrepareCommunication(FCommunicator);
       FHandler.DoHandleCommunication(FCommunicator);
     finally
-      FCommunicator.Close;
-      FCommunicator.Free;
+      FHandler.FinalizeCommunication(FCommunicator);
     end;
   finally
     Recv.Kill;
@@ -267,28 +279,80 @@ end;
 
 { TWebsocketHandler }
 
+constructor TWebsocketHandler.Create;
+begin
+  FConnections := TThreadedConnectionList.Create(TConnectionList.Create);
+end;
+
+destructor TWebsocketHandler.Destroy;
+var
+  ConnectionList: TConnectionList;
+  Connection: TWebsocketCommunincator;
+begin
+  ConnectionList := FConnections.Lock;
+  try
+    for Connection in ConnectionList do
+      Connection.Close(True);
+  finally
+    FConnections.Unlock;
+  end;
+  // wait for all connections to close
+  sleep(100);
+  FConnections.Free;
+  inherited Destroy;
+end;
+
 function TWebsocketHandler.Accept(const ARequest: TRequestData;
   const ResponseHeaders: TStrings): boolean;
 begin
   Result := True;
 end;
 
-procedure TWebsocketHandler.HandleCommunication(
+procedure TWebsocketHandler.PrepareCommunication(
+  ACommunicator: TWebsocketCommunincator);
+var
+  lst: TConnectionList;
+begin
+  lst := FConnections.Lock;
+  try
+    lst.Add(ACommunicator);
+  finally
+    FConnections.Unlock;
+  end;
+end;
+
+procedure TWebsocketHandler.DoHandleCommunication(
   ACommunicator: TWebsocketCommunincator);
 begin
   // No implementation; To be overriden
+end;
+
+procedure TWebsocketHandler.FinalizeCommunication(
+  ACommunicator: TWebsocketCommunincator);
+var
+  lst: TConnectionList;
+begin
+  ACommunicator.Close;
+  lst := FConnections.Lock;
+  try
+    lst.Remove(ACommunicator);
+  finally
+    FConnections.Unlock;
+  end;
+end;
+
+procedure TWebsocketHandler.HandleCommunication(
+  ACommunicator: TWebsocketCommunincator);
+begin
+  PrepareCommunication(ACommunicator);
+  DoHandleCommunication(ACommunicator);
+  FinalizeCommunication(ACommunicator);
 end;
 
 procedure TThreadedWebsocketHandler.HandleCommunication(
   ACommunicator: TWebsocketCommunincator);
 begin
   CreateHandlerThread(ACommunicator, Self);
-end;
-
-procedure TThreadedWebsocketHandler.DoHandleCommunication(
-  ACommunication: TWebsocketCommunincator);
-begin
-  // No implementation; To be overriden
 end;
 
 { THostMap }

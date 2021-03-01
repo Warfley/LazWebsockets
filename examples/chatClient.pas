@@ -88,12 +88,7 @@ begin
         Free;
       end
     else
-      with FCommunicator.WriteMessage do
-      try
-        WriteRaw(str);
-      finally
-        Free;
-      end;
+      FCommunicator.WriteStringMessage(str);
   end;
 end;
 

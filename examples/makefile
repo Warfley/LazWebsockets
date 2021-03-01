@@ -1,4 +1,4 @@
-all: bin bin/chatServer bin/chatClient
+all: bin bin/chatServer bin/chatClient bin/broadcastServer
 
 FPC_OPT=-g -gh -Ci -Cr -Co -Ct -CR -Sa
 	
