@@ -131,3 +131,12 @@ An alternative JavaScript based client for the server can be found in the html d
 The `chatClient.pas` example can also send special codes: by typing `exit` the connection will be closed gracefully and with `ping message` a ping with `message` as content can be sent.
 
 The `chatServer` simply allows clients to connect and can recive and send messages. The `broadcastServer` allows clients to connect and sends all messages sent to it to all currently connected clients.
+
+## Thread Pooling
+Creating threads is slow, which is why this library implements the ability for thread pooling. 
+This means instead of destroying a thread once it is finished, it will be waiting in the background to be reused when necessary.
+Thread pooling is enabled by default. In some situations it might be helpful to deactivate thread pooling, especially if you run into problems like deadlocks or memory issues.
+
+To deactivate thread pooling simply call the constructor of `TThreadedWebsocketHandler` with the argument `pooling` set to `False`, i.e. `TMySocketHandler.Create(False)` or if your handler has it's own constructor, call `inherited Create(False);` from there.
+
+The handshake is by default not threaded, see the `TWebsocketServer.AcceptingMethod` property for further information
