@@ -1,11 +1,12 @@
 unit wsutils;
 
 {$mode objfpc}{$H+}
+{$ModeSwitch advancedrecords}
 
 interface
 
 uses
-  Classes, SysUtils, gvector, fgl;
+  Classes, SysUtils, gvector, fgl, {$IfDef WINDOWS}windows{$Else}unixtype, pthreads{$EndIf};
 
 type    
 
@@ -31,48 +32,60 @@ type
     procedure Unlock;
   end;
 
-  { TObjectPool }
+  { TMutex }
 
-  generic TObjectPool<T, Factory, Checker> = class
+  TMutex = record
   private
-    type
-    TPool = class(specialize TVector<T>);
-  private
-    FWorking: TPool;
-    FIdle: TPool;
-    procedure CleanUp;
+    {$IfDef WINDOWS}
+    semaphore: HANDLE;
+    {$Else}
+    mutex: pthread_mutex_t;
+    {$EndIf}
   public
-    constructor Create;
-    destructor Destroy; override;
-
-    function GetObject: T;
+    procedure Init;
+    procedure Done;
+    function Lock: Boolean;
+    procedure Unlock;
   end;
 
   { TPoolableThread }
 
-  TPoolableThread = class(TThread)
+  generic TPoolableThread<T> = class(TThread)
   private
-    FDoTerminate: boolean;
-    FIsIdle: boolean;
+    FLock: TMutex;
+    FIdle: Boolean;
+    FStopped: Boolean;
+    FTaskArg: T;
+    FPooling: Boolean;
   protected
-    procedure DoExecute; virtual;
+    procedure ExecuteTask(constref Arg: T); virtual; abstract;
     procedure Execute; override;
   public
-    constructor Create(CreateSuspended: boolean;
-      const StackSize: SizeUInt = DefaultStackSize);
-    procedure Restart; virtual;
-    property isIdle: boolean read FIsIdle;
-    property DoTerminate: boolean read FDoTerminate write FDoTerminate;
+    constructor Create(Pooling: Boolean);
+    destructor Destroy; override;
+
+    procedure Start(const Arg: T); virtual;
+    procedure Stop; virtual;
+    procedure Kill; virtual;
+    property Stopped: Boolean read FStopped;
+    property IsIdle: Boolean read FIdle;
   end;
 
-  { TPoolableThreadFactory }
+  { TThreadPool }
 
-  generic TPoolableThreadFactory<T> = class
+  generic TThreadPool<TThreadTypeArg> = class
+  public type TThreadType = TThreadTypeArg;
+  private type TThreadList = class(specialize TFPGList<TThreadType>);
+  private
+    FWorking: TThreadList;
+    FIdle: TThreadList;
+    FPooling: Boolean;
+    procedure Cleanup;
+    function CreateThread: TThreadType;
   public
-    class function Produce: T;
-    class function isIdle(const AThread: T): boolean;
-    class procedure Clear(const AThread: T);
-    class procedure DoDestroy(const AThread: T);
+    constructor Create(Pooling: Boolean);
+    destructor Destroy; override;
+    function GetThread: TThreadType;
   end;
 
   { TStreamHelper }
@@ -326,162 +339,171 @@ begin
   self.WriteBuffer(Data[1], Data.Length);
 end;
 
+{ TMutex }
 
-{ TObjectPool }
-{* -----------------------------------------------------------------------------
- * Searches the whole list, checks if some of the objects can be transfered from
- * working to idle
- * ----------------------------------------------------------------------------}
-procedure TObjectPool.CleanUp;
+procedure TMutex.Init;
+begin
+  {$IfDef WINDOWS}
+  semaphore := CreateSemaphore(nil, 1, 1, nil);
+  {$Else}
+  pthread_mutex_init(@mutex, nil);
+  {$EndIf}
+end;
+
+procedure TMutex.Done;
+begin
+  {$IfDef WINDOWS}
+  CloseHandle(semaphore);
+  {$Else}
+  pthread_mutex_destroy(@mutex);
+  {$EndIf}
+end;
+
+function TMutex.Lock: Boolean;
+begin
+  {$IfDef WINDOWS}
+  Result := WaitForSingleObject(semaphore, -1) = WAIT_OBJECT_0;
+  {$Else}
+  Result := pthread_mutex_lock(@mutex) = 0;
+  {$EndIf}
+end;
+
+procedure TMutex.Unlock;
+begin
+  {$IfDef WINDOWS}
+  ReleaseSemaphore(semaphore, 1, nil);
+  {$Else}
+  pthread_mutex_unlock(@mutex);
+  {$EndIf}
+end;
+
+{ TThreadPool }
+
+procedure TThreadPool.Cleanup;
 var
-  i: SizeUInt;
-  len: SizeUInt;
+  Worker: TThreadType;
+  i: SizeInt;
 begin
   i := 0;
-  len := FWorking.Size;
-  while i < len do
+  while i < FWorking.Count do
   begin
-    if Checker.isIdle(FWorking[i]) then
+    Worker := FWorking[i];
+    if Worker.isIdle then
     begin
-      // If idle than put into idle list
-      FIdle.PushBack(FWorking[i]);
-      // swap delete, so in the end we only need to reduce the size
-      FWorking[i] := FWorking[len - 1];
-      Dec(len);
+      FIdle.Add(Worker);
+      // swap delete
+      FWorking[i] := FWorking[FWorking.Count - 1];
+      FWorking.Delete(FWorking.Count - 1);
     end
     else
-    begin
       Inc(i);
-    end;
   end;
-  // "Remove" the deleted objects
-  FWorking.Resize(len);
-  (* Maybe this is usefull?
-  if FIdle.Size > FWorking.Size + 1 then
-  begin
-    for i := FWorking.Size + 1 to FIdle.Size - 1 do
-      Factory.DoDestroy(FIdle[i]);
-    FIdle.Resize(FWorking.Size + 1);
-  end;
-  *)
 end;
 
-constructor TObjectPool.Create;
+function TThreadPool.CreateThread: TThreadType;
 begin
-  FWorking := TPool.Create;
-  FIdle := TPool.Create;
+  Result := TThreadType.Create(FPooling);
+  Result.FreeOnTerminate := True;
 end;
 
-destructor TObjectPool.Destroy;
+constructor TThreadPool.Create(Pooling: Boolean);
+begin
+  FWorking := TThreadList.Create;
+  FIdle := TThreadList.Create;
+  FPooling := Pooling;
+end;
+
+destructor TThreadPool.Destroy;
 var
-  obj: T;
+  Worker: TThreadType;
 begin
-  for obj in FWorking do
-    Factory.DoDestroy(obj);
+  for Worker in FWorking do
+    Worker.Kill;
+  for Worker in FIdle do
+    Worker.Kill;
   FWorking.Free;
-  for obj in FIdle do
-    Factory.DoDestroy(obj);
   FIdle.Free;
   inherited Destroy;
 end;
 
-{* -----------------------------------------------------------------------------
- * Returns an object. If Idle ones are available they are reused, otherwise
- * new ones will be created
- * ----------------------------------------------------------------------------}
-function TObjectPool.GetObject: T;
+function TThreadPool.GetThread: TThreadType;
 var
-  i: SizeUInt;
+  i: SizeInt;
 begin
-  CleanUp;
-  // If we have objects cached return one of them
-  if FIdle.Size > 0 then
+  Cleanup;
+  if FIdle.Count > 0 then
   begin
-    Result := FIdle.Back;
-    FIdle.PopBack;
-    Factory.Clear(Result);
-    FWorking.PushBack(Result);
+    Result := FIdle[FIdle.Count - 1];
+    FIdle.Delete(FIdle.Count - 1);
   end
-  // if this isn't the first object, create as many idle ones as there are working ones
-  else if FWorking.Size > 0 then
+  else for i := 0 to FWorking.Count do
   begin
-    FIdle.Reserve(FWorking.Size);
-    for i := 0 to FWorking.Size do
-      FIdle.PushBack(Factory.Produce);
-    Result := FIdle.Back;
-    FIdle.PopBack;
-    Factory.Clear(Result);
-    FWorking.PushBack(Result);
-  end
-  else // otherwise create only one
-  begin
-    Result := Factory.Produce;
-    Factory.Clear(Result);
-    FWorking.PushBack(Result);
+    Result := CreateThread;
+    if i < FWorking.Count then
+      FIdle.Add(Result);
   end;
-end;
-
-{ TPoolableThreadFactory }
-
-class function TPoolableThreadFactory.Produce: T;
-begin
-  Result := T.Create(True);
-end;
-
-class function TPoolableThreadFactory.isIdle(const AThread: T): boolean;
-begin
-  Result := AThread.IsIdle;
-end;
-
-class procedure TPoolableThreadFactory.Clear(const AThread: T);
-begin
-  // Nothing to be done here
-end;
-
-class procedure TPoolableThreadFactory.DoDestroy(const AThread: T);
-begin
-  AThread.Free;
+  FWorking.Add(Result);
 end;
 
 { TPoolableThread }
 
-procedure TPoolableThread.DoExecute;
-begin
-
-end;
-
 procedure TPoolableThread.Execute;
 begin
-  while not Self.Terminated do
+  while not Terminated do
   begin
-    while isIdle do
-    begin
-      if Self.Terminated then
-        Exit;
-      //TThread.Yield;
-      Sleep(0);
+    FLock.Lock;
+    try
+      FIdle := False;
+      if Terminated then Exit;
+      FStopped := False;
+      ExecuteTask(FTaskArg);
+    finally
+      FLock.Unlock;
     end;
-    DoExecute;
-    if FDoTerminate then
-      self.Terminate
+    if not Terminated and FPooling then
+    begin
+      FLock.Lock;
+      FIdle := True;
+    end
     else
-      FIsIdle := True;
+      Terminate;
   end;
 end;
 
-constructor TPoolableThread.Create(CreateSuspended: boolean; const StackSize: SizeUInt);
+constructor TPoolableThread.Create(Pooling: Boolean);
 begin
-  FDoTerminate := False;
-  if CreateSuspended then
-    FIsIdle := True
-  else
-    FIsIdle := False;
-  inherited Create(False, StackSize);
+  FLock.Init;
+  FLock.Lock;
+  FIdle := True;
+  FPooling := Pooling;
+  inherited Create(False);
 end;
 
-procedure TPoolableThread.Restart;
+destructor TPoolableThread.Destroy;
 begin
-  FIsIdle := False;
+  Kill;
+  FLock.Lock;
+  inherited Destroy;
+end;
+
+procedure TPoolableThread.Start(const Arg: T);
+begin
+  Assert(isIdle);
+  FTaskArg := Arg;
+  FLock.Unlock;
+end;
+
+procedure TPoolableThread.Stop;
+begin
+  FStopped:=True;
+end;
+
+procedure TPoolableThread.Kill;
+begin
+  Terminate;
+  Stop;
+  if isIdle then
+    FLock.Unlock;
 end;
 
 end.
