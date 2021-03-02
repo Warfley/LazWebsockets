@@ -38,8 +38,13 @@ type
     property Connections: TThreadedConnectionList read FConnections;
   end;
 
+  { TThreadedWebsocketHandler }
+
   TThreadedWebsocketHandler = class(TWebsocketHandler)
+  private
+    FPooling: Boolean;
   public
+    constructor Create(Pooling: Boolean = True);
     procedure HandleCommunication(ACommunicator: TWebsocketCommunincator); override;
   end;
 
@@ -110,42 +115,31 @@ const
 implementation
 
 type
+  TWebsocketHandlerArgs = record
+    Communicator: TWebsocketCommunincator;
+    Handler: TThreadedWebsocketHandler;
+    Pooling: Boolean;
+  end;
 
   {Thread Types}
   { TWebsocketHandlerThread }
 
-  TWebsocketHandlerThread = class(TPoolableThread)
-  private
-    FCommunicator: TWebsocketCommunincator;
-    FHandler: TThreadedWebsocketHandler;
+  TWebsocketHandlerThread = class(specialize TPoolableThread<TWebsocketHandlerArgs>)
   protected
-    procedure DoExecute; override;
-    property Handler: TThreadedWebsocketHandler read FHandler write FHandler;
-    property Communicator: TWebsocketCommunincator
-      read FCommunicator write FCommunicator;
+    procedure ExecuteTask(constref Arg: TWebsocketHandlerArgs); override;
   end;
 
-  THandlerThreadFactory = specialize TPoolableThreadFactory<TWebsocketHandlerThread>;
-  THandlerThreadPool = specialize TObjectPool<TWebsocketHandlerThread,
-    THandlerThreadFactory, THandlerThreadFactory>;
+  THandlerThreadPool = specialize TThreadPool<TWebsocketHandlerThread>;
   TLockedHandlerThreadPool = specialize TThreadedObject<THandlerThreadPool>;
 
   { TWebsocketRecieverThread }
 
-  TWebsocketRecieverThread = class(TPoolableThread)
-  private
-    FCommunicator: TWebsocketCommunincator;
-    FStopped: boolean;
+  TWebsocketRecieverThread = class(specialize TPoolableThread<TWebsocketCommunincator>)
   protected
-    procedure DoExecute; override;
-    procedure Kill;
-    property Communicator: TWebsocketCommunincator
-      read FCommunicator write FCommunicator;
+    procedure ExecuteTask(constref Arg: TWebsocketCommunincator); override;
   end;
 
-  TRecieverThreadFactory = specialize TPoolableThreadFactory<TWebsocketRecieverThread>;
-  TRecieverThreadPool = specialize TObjectPool<TWebsocketRecieverThread,
-    TRecieverThreadFactory, TRecieverThreadFactory>;
+  TRecieverThreadPool = specialize TThreadPool<TWebsocketRecieverThread>;
   TLockedRecieverThreadPool = specialize TThreadedObject<TRecieverThreadPool>;
 
   { TWebsocketHandshakeHandler }
@@ -162,19 +156,12 @@ type
 
   { TAcceptingThread }
 
-  TAcceptingThread = class(TPoolableThread)
-  private
-    FHandshakeHandler: TWebsocketHandshakeHandler;
+  TAcceptingThread = class(specialize TPoolableThread<TWebsocketHandshakeHandler>)
   protected
-    procedure DoExecute; override;
-
-    property HandshakeHandler: TWebsocketHandshakeHandler
-      read FHandshakeHandler write FHandshakeHandler;
+    procedure ExecuteTask(constref Arg: TWebsocketHandshakeHandler); override;
   end;
 
-  TAcceptingThreadFactory = specialize TPoolableThreadFactory<TAcceptingThread>;
-  TAcceptingThreadPool = specialize TObjectPool<TAcceptingThread,
-    TAcceptingThreadFactory, TAcceptingThreadFactory>;
+  TAcceptingThreadPool = specialize TThreadPool<TAcceptingThread>;
   TLockedAcceptingThreadPool = specialize TThreadedObject<TAcceptingThreadPool>;
 
 var
@@ -183,90 +170,114 @@ var
   AcceptingThreadPool: TLockedAcceptingThreadPool;
 
 function CreateAcceptingThread(
-  const AHandshakeHandler: TWebsocketHandshakeHandler): TAcceptingThread; inline;
+  const AHandshakeHandler: TWebsocketHandshakeHandler; Pooling: Boolean): TAcceptingThread; inline;
 var
   pool: TAcceptingThreadPool;
 begin
-  pool := AcceptingThreadPool.Lock;
-  try
-    Result := pool.GetObject;
-    Result.HandshakeHandler := AHandshakeHandler;
-    Result.Restart;
-  finally
-    AcceptingThreadPool.Unlock;
+  if Pooling then
+  begin
+    pool := AcceptingThreadPool.Lock;
+    try
+      Result := pool.GetThread;
+      Result.Start(AHandshakeHandler);
+    finally
+      AcceptingThreadPool.Unlock;
+    end;
+  end
+  else
+  begin
+    Result := TAcceptingThread.Create(False);
+    Result.FreeOnTerminate := True;
+    Result.Start(AHandshakeHandler);
   end;
 end;
 
 function CreateHandlerThread(const ACommunicator: TWebsocketCommunincator;
-  const AHandler: TThreadedWebsocketHandler): TWebsocketHandlerThread; inline;
+  const AHandler: TThreadedWebsocketHandler; Pooling: Boolean): TWebsocketHandlerThread; inline;
 var
   pool: THandlerThreadPool;
+  args: TWebsocketHandlerArgs;
 begin
-  pool := HandlerThreadPool.Lock;
-  try
-    Result := pool.GetObject;
-    Result.Communicator := ACommunicator;
-    Result.Handler := AHandler;
-    Result.Restart;
-  finally
-    HandlerThreadPool.Unlock;
+  Args.Communicator := ACommunicator;
+  Args.Handler := AHandler;
+  Args.Pooling := Pooling;
+  if Pooling then
+  begin
+    pool := HandlerThreadPool.Lock;
+    try
+      Result := pool.GetThread;
+      Result.Start(args);
+    finally
+      HandlerThreadPool.Unlock;
+    end;
+  end
+  else
+  begin
+    Result := TWebsocketHandlerThread.Create(False);
+    Result.FreeOnTerminate := True;
+    Result.Start(Args);
   end;
 end;
 
-function CreateRecieverThread(const ACommunicator: TWebsocketCommunincator):
+function CreateRecieverThread(const ACommunicator: TWebsocketCommunincator; Pooling: Boolean):
 TWebsocketRecieverThread; inline;
 var
   pool: TRecieverThreadPool;
 begin
-  pool := RecieverThreadPool.Lock;
-  try
-    Result := pool.GetObject;
-    Result.Communicator := ACommunicator;
-    Result.Restart;
-  finally
-    RecieverThreadPool.Unlock;
+  if Pooling then
+  begin
+    pool := RecieverThreadPool.Lock;
+    try
+      Result := pool.GetThread;
+      Result.Start(ACommunicator);
+    finally
+      RecieverThreadPool.Unlock;
+    end;
+  end
+  else
+  begin
+    Result := TWebsocketRecieverThread.Create(False);
+    Result.FreeOnTerminate := True;
+    Result.Start(ACommunicator);
   end;
 end;
 
 { TWebsocketHandlerThread }
 
-procedure TWebsocketHandlerThread.DoExecute;
+procedure TWebsocketHandlerThread.ExecuteTask(constref
+  Arg: TWebsocketHandlerArgs);
 var
   Recv: TWebsocketRecieverThread;
 begin
-  Recv := CreateRecieverThread(FCommunicator);
+  Recv := CreateRecieverThread(arg.Communicator, Arg.Pooling);
   try
     try
-      FHandler.PrepareCommunication(FCommunicator);
-      FHandler.DoHandleCommunication(FCommunicator);
+      Arg.Handler.PrepareCommunication(arg.Communicator);
+      Arg.Handler.DoHandleCommunication(arg.Communicator);
     finally
-      FHandler.FinalizeCommunication(FCommunicator);
+      Arg.Handler.FinalizeCommunication(arg.Communicator);
     end;
   finally
-    Recv.Kill;
+    Recv.Stop;
   end;
 end;
 
-procedure TAcceptingThread.DoExecute;
+procedure TAcceptingThread.ExecuteTask(constref Arg: TWebsocketHandshakeHandler
+  );
 begin
-  FHandshakeHandler.PerformHandshake;
+  Arg.PerformHandshake;
 end;
 
 { TWebsocketRecieverThread }
 
-procedure TWebsocketRecieverThread.DoExecute;
+procedure TWebsocketRecieverThread.ExecuteTask(constref
+  Arg: TWebsocketCommunincator);
 begin
-  FStopped := False;
-  while not Terminated and not FStopped and FCommunicator.Open do
+  while not Terminated and not Stopped and Arg.Open do
   begin
-    FCommunicator.RecieveMessage;
+    Arg.RecieveMessage;
     Sleep(10);
   end;
-end;
-
-procedure TWebsocketRecieverThread.Kill;
-begin
-  FStopped := True;
 end;
 
 { THostHandler }
@@ -349,10 +360,16 @@ begin
   FinalizeCommunication(ACommunicator);
 end;
 
+constructor TThreadedWebsocketHandler.Create(Pooling: Boolean);
+begin
+  FPooling := Pooling;
+  inherited Create;
+end;
+
 procedure TThreadedWebsocketHandler.HandleCommunication(
   ACommunicator: TWebsocketCommunincator);
 begin
-  CreateHandlerThread(ACommunicator, Self);
+  CreateHandlerThread(ACommunicator, Self, FPooling);
 end;
 
 { THostMap }
@@ -548,20 +565,10 @@ var
   t: TAcceptingThread;
 begin
   HandshakeHandler := TWebsocketHandshakeHandler.Create(Data, FHostMap);
-  case AcceptingMethod of
-    samDefault:
-      HandshakeHandler.PerformHandshake;
-    samThreaded:
-    begin
-      t := TAcceptingThread.Create(True);
-      t.DoTerminate := True;
-      t.FreeOnTerminate := True;
-      t.HandshakeHandler := HandshakeHandler;
-      t.Restart;
-    end;
-    samThreadPool:
-      CreateAcceptingThread(HandshakeHandler);
-  end;
+  if AcceptingMethod = samDefault then
+    HandshakeHandler.PerformHandshake
+  else
+    CreateAcceptingThread(HandshakeHandler, AcceptingMethod = samThreadPool);
 end;
 
 procedure TWebSocketServer.Start;
@@ -620,9 +627,9 @@ begin
 end;
 
 initialization
-  AcceptingThreadPool := TLockedAcceptingThreadPool.Create(TAcceptingThreadPool.Create);
-  HandlerThreadPool := TLockedHandlerThreadPool.Create(THandlerThreadPool.Create);
-  RecieverThreadPool := TLockedRecieverThreadPool.Create(TRecieverThreadPool.Create);
+  AcceptingThreadPool := TLockedAcceptingThreadPool.Create(TAcceptingThreadPool.Create(True));
+  HandlerThreadPool := TLockedHandlerThreadPool.Create(THandlerThreadPool.Create(True));
+  RecieverThreadPool := TLockedRecieverThreadPool.Create(TRecieverThreadPool.Create(True));
 
 finalization
   AcceptingThreadPool.Free;

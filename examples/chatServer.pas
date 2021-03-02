@@ -15,13 +15,14 @@ type
   { TSocketHandler }
 
   TSocketHandler = class(TThreadedWebsocketHandler)
+  private
+    procedure ConnectionClosed(Sender: TObject);
+    procedure MessageRecieved(Sender: TObject);
+  public
     function Accept(const ARequest: TRequestData;
       const ResponseHeaders: TStrings): boolean; override;
     procedure DoHandleCommunication(ACommunication: TWebsocketCommunincator);
       override;
-  private
-    procedure ConnectionClosed(Sender: TObject);
-    procedure MessageRecieved(Sender: TObject);
   end;
 
 var
@@ -88,6 +89,7 @@ begin
   socket := TWebSocketServer.Create(8080);
   try
     socket.FreeHandlers := True;
+    //socket.AcceptingMethod:=samThreadPool;
     socket.RegisterHandler('*', '*', TSocketHandler.Create, True, True);
     socket.Start;
   finally
