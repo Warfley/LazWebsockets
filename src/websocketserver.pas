@@ -249,16 +249,17 @@ procedure TWebsocketHandlerThread.ExecuteTask(constref
 var
   Recv: TWebsocketRecieverThread;
 begin
-  Recv := CreateRecieverThread(arg.Communicator, Arg.Pooling);
   try
+  Recv := CreateRecieverThread(arg.Communicator, Arg.Pooling);
     try
       Arg.Handler.PrepareCommunication(arg.Communicator);
       Arg.Handler.DoHandleCommunication(arg.Communicator);
     finally
-      Arg.Handler.FinalizeCommunication(arg.Communicator);
+      Recv.Stop;
     end;
+    Sleep(20);
   finally
-    Recv.Stop;
+    Arg.Handler.FinalizeCommunication(arg.Communicator);
   end;
 end;
 
@@ -344,6 +345,7 @@ var
   lst: TConnectionList;
 begin
   ACommunicator.Close;
+  Sleep(20);
   lst := FConnections.Lock;
   try
     lst.Remove(ACommunicator);
