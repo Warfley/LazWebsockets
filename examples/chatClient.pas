@@ -15,22 +15,10 @@ uses
 
 type
 
-  { TRecieverThread }
-
-  TRecieverThread = class(TThread)
-  private
-    FCommunicator: TWebsocketCommunincator;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(ACommunicator: TWebsocketCommunincator);
-  end;
-
   { TSimpleChat }
 
   TSimpleChat = class
-  private      
-    FReciever: TRecieverThread;
+  private
     FCommunicator: TWebsocketCommunincator;
     procedure RecieveMessage(Sender: TObject);
     procedure StreamClosed(Sender: TObject);
@@ -97,33 +85,16 @@ begin
   FCommunicator := ACommunicator;
   FCommunicator.OnClose:=@StreamClosed;
   FCommunicator.OnRecieveMessage:=@RecieveMessage;
-  FReciever := TRecieverThread.Create(ACommunicator);
+  FCommunicator.StartRecieveMessageThread;
 end;
 
 destructor TSimpleChat.Destroy;
 begin
-  while not FReciever.Finished do
+  FCommunicator.StopRecieveMessageThread;
+  while FCommunicator.RecieveMessageThreadRunning do
     Sleep(10);
-  FReciever.Free;
   FCommunicator.Free;
   inherited Destroy;
-end;
-
-{ TRecieverThread }
-
-procedure TRecieverThread.Execute;
-begin
-  while not Terminated and FCommunicator.Open do
-  begin
-    FCommunicator.RecieveMessage;
-    Sleep(100);
-  end;
-end;
-
-constructor TRecieverThread.Create(ACommunicator: TWebsocketCommunincator);
-begin
-  FCommunicator := ACommunicator;
-  inherited Create(False);
 end;
 
 var

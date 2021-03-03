@@ -18,6 +18,20 @@ type
     constructor Create;
   end;
 
+  { TThreadedData }
+
+  generic TThreadedData<T> = record
+  public type PT = ^T;
+  private
+    FData: T;
+    FLock: TRTLCriticalSection;
+  public
+    procedure Init(const AValue: T);
+    procedure Done;
+    function Lock: PT;
+    procedure Unlock;
+  end;
+
   { TThreadedObject }
 
   generic TThreadedObject<T> = class
@@ -130,6 +144,30 @@ function DoHeaderKeyCompare(const Key1, Key2: string): integer;
 begin
   // Headers are case insensetive
   Result := CompareStr(Key1.ToLower, Key2.ToLower);
+end;
+
+{ TThreadedData }
+
+procedure TThreadedData.Init(const AValue: T);
+begin
+  InitCriticalSection(FLock);
+  FData := AValue;
+end;
+
+procedure TThreadedData.Done;
+begin
+  DoneCriticalSection(FLock);
+end;
+
+function TThreadedData.Lock: PT;
+begin
+  EnterCriticalSection(FLock);
+  Result := @FData;
+end;
+
+procedure TThreadedData.Unlock;
+begin
+  LeaveCriticalSection(FLock);
 end;
 
 procedure THttpHeader.Parse(const HeaderString: string);
@@ -362,7 +400,7 @@ end;
 function TMutex.Lock: Boolean;
 begin
   {$IfDef WINDOWS}
-  Result := WaitForSingleObject(semaphore, -1) = WAIT_OBJECT_0;
+  Result := WaitForSingleObject(semaphore, INFINITE) = WAIT_OBJECT_0;
   {$Else}
   Result := pthread_mutex_lock(@mutex) = 0;
   {$EndIf}

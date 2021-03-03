@@ -5,7 +5,7 @@ unit WebSocketServer;
 interface
 
 uses
-  Classes, SysUtils, ssockets, fgl, wsutils, wsstream;
+  Classes, SysUtils, ssockets, fgl, wsutils, wsstream, wsmessages;
 
 type
 
@@ -273,10 +273,14 @@ end;
 
 procedure TWebsocketRecieverThread.ExecuteTask(constref
   Arg: TWebsocketCommunincator);
+var
+  msg: TWebsocketMessage;
 begin
   while not Terminated and not Stopped and Arg.Open do
   begin
-    Arg.RecieveMessage;
+    msg := Arg.RecieveMessage;
+    if Assigned(msg) then
+      Arg.AddMessageToList(msg);
     Sleep(10);
   end;
 end;

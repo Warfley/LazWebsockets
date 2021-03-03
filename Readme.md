@@ -88,20 +88,41 @@ property OnHandshakeFailure: TWebsocketHandshakeResponseEvent;
 `CustomHeaders` can be used to add headers to the HTTP handshake, e.g. an authorization header. The two events are triggered after the handshake, on success or failure respectively. The events get some information about the server response passed, this includes the headers (e.g. for recieving cookies), but also the content and statuscode, in case of a failure (e.g. to check against 404 or 403).
 
 ### Recieving and Sending Messages
-All the communication is done via the `TWebsocketCommunincator` class. It provides three basic methods for communication:
+All the communication is done via the `TWebsocketCommunincator` class. For recieving messages it contains the following methods:
+```pascal
+    function RecieveMessage: TWebsocketMessage;
+    procedure StartRecieveMessageThread;
+    procedure StopRecieveMessageThread;
+    function RecieveMessageThreadRunning: Boolean;
+    function InRecieveMessageThread: Boolean;
+    function HasMessages: Boolean;
+    function GetUnprocessedMessages(const MsgList: TWebsocketMessageOwnerList): integer;
+    function WaitForMessage(MessageTypes: TWebsocketMessageTypes=[wmtString, wmtBinary, wmtPong]
+      ): TWebsocketMessage;
+    function WaitForStringMessage: TWebsocketStringMessage; inline;
+    function WaitForBinaryMessage: TWebsocketBinaryMessage; inline;
+    function WaitForPongMessage: TWebsocketPongMessage; inline;
 ```
-procedure RecieveMessage;
-function GetUnprocessedMessages(const MsgList: TWebsocketMessageOwnerList): integer; 
-function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
-  MaxFrameLength: int64 = 125): TWebsocketMessageStream;
-procedure WriteRawMessage(const AMessage; ALength: SizeInt;
-  AMessageType: TWebsocketMessageType); inline;
-procedure WriteStringMessage(const AMessage: String); inline;
-procedure WriteBinaryMessage(const AMessage: TBytes); inline;
-```
-`RecieveMessages` will recieve any incomming message. If it's a ping message, it will answer directly with a respective pong message. If the incoming message is a close request, it will answer with the respecitive close request and then close the connection. Any other message (String, Binary or Pong Message) will be added the internal message queue. Messages from that queue can be retrieved via the method `GetUnprocessedMessage` and than be processed. This is implemented thread safe, meaning the message queue is internally locked, so RecieveMessages and GetUnprocessedMessages can be called from different threads.
+`RecieveMessage` will block until a message was recieved. If the message was a binary or string message, it will be returned. If the message was a Pong message, the message will be added the internal message queue. It will also handle all control frames like pings or close frames transparently. Only use this method if you know what you are doing.
+To simply handle all incoming messages, you can use `StartRecieveMessageThread` to start a new thread that will continously check for incoming messages and add them to the internal message queue.
 
-Lastly we have `WriteMessage` and the three helper functions `WriteRawMessage`, `WriteStringMessage` and `WriteBinaryMessage`. `WriteMessage` creates a `TWebsocketMessageStream` for us to send messages to the client. These should be either string (`wmtString`), binary (`wmtBinary`) or ping (`wmtPing`) messages. After a ping, the responding pong will be recieved by RecieveMessages and can be processed by the user as any other message.
+Messages from that queue can be retrieved via the method `GetUnprocessedMessage` and than be processed. This is implemented thread safe, meaning the message queue is internally locked, so RecieveMessages and GetUnprocessedMessages can be called from different threads. This thread can be stopped via `StopRecieveMessageThread` (will take effect after the next message was read) and can be checked if it is running using `RecieveMessageThreadRunning`.
+
+The internal message queue is a thread safe list object, that can be emptied via `GetUnprocessedMessages`. Whenever a new element is added to the queue, it will trigger the `OnRecieveMessage` event. This event is triggered from within the thread that has recieved the message. if you want to interact with other threads, e.g. the GUI thread, potential synchronization is needed. To check if you are currently within the recieve message thread, you can use `InRecieveMessageThread`.
+
+If you are expecting a message and want to wait for it, you can use `WaitForMessage`, `WaitForStringMessage`, `WaitForBinaryMessage` or `WaitForPongMessage`. Unlike RecieveMessage, these function also return Pong messages, but also work in the asynchronous mode (when a reciever thread is running) as well as in the synchronous mode (i.e. calling recievethread itself). If any other messages arrived during this process, that are not the type of message you are waiting for, it will call the `OnRecieveMessage` event from within the current thread.
+
+For writing we have `WriteMessage` and the three helper functions `WriteRawMessage`, `WriteStringMessage` and `WriteBinaryMessage`:
+```pascal
+    function WriteMessage(MessageType: TWebsocketMessageType = wmtString;
+      MaxFrameLength: int64 = Word.MaxValue): TWebsocketMessageStream;
+    procedure WriteRawMessage(const AMessage; ALength: SizeInt;
+      AMessageType: TWebsocketMessageType = wmtString); inline;
+    procedure WriteStringMessage(const AMessage: String); inline;
+    procedure WriteBinaryMessage(const AMessage: TBytes); inline;
+```
+
+`WriteMessage` creates a `TWebsocketMessageStream` for us to send messages to the client. These should be either string (`wmtString`), binary (`wmtBinary`) or ping (`wmtPing`) messages. After a ping, the responding pong will be recieved by RecieveMessages and can be processed by the user as any other message.
 `WriteRawMessage` will take a buffer and will write that wholy into the stream and close the stream afterwards. `WriteStringMessage` and `WriteBinaryMessage` will open a stream, write data from a string/array into it and close the stream afterwards. These three helper functions can be used to avoid the boilerplate code of opening the stream and having to free it afterwards, but don't support fragmentation.
 
 While `RecieveMessage` is blocking until at least one message is read. But it is implemented thread safe, meaning you can send messages while reading, without problems. This is archived by locking, while in general not nessecary as reading and writing can technically be done in parallel, but to avoid complications we lock stream access

@@ -11,6 +11,7 @@ type
   // Represent opcodes
   TWebsocketMessageType = (wmtContinue = 0, wmtString = 1, wmtBinary =
     2, wmtClose = 8, wmtPing = 9, wmtPong = 10);
+  TWebsocketMessageTypes = set of TWebsocketMessageType;
 
   { TWebsocketMessage }
 
