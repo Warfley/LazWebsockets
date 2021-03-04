@@ -90,15 +90,15 @@ type
     FMessages: TLockedWebsocketMessageList;
     FMaskMessages: boolean;
     FAssumeMaskedMessages: boolean;
-    FOnRecieveMessage: TLockedEvent;
+    FOnReceiveMessage: TLockedEvent;
     FOnClose: TLockedEvent;
     FExpectClose: boolean;
-    FRecieveMessageThread: TThread;
+    FReceiveMessageThread: TThread;
     function GetOnClose: TNotifyEvent;
-    function GetOnRecieveMessage: TNotifyEvent;
+    function GetOnReceiveMessage: TNotifyEvent;
     function GetOpen: boolean;
     procedure SetOnClose(AValue: TNotifyEvent);
-    procedure SetOnRecieveMessage(AValue: TNotifyEvent);
+    procedure SetOnReceiveMessage(AValue: TNotifyEvent);
   public
     procedure AddMessageToList(Message: TWebsocketMessage);
     constructor Create(AStream: TLockedSocketStream; AMaskMessage: boolean;
@@ -107,11 +107,11 @@ type
 
     procedure Close(ForceClose: boolean = False);
 
-    function RecieveMessage: TWebsocketMessage;
-    procedure StartRecieveMessageThread;
-    procedure StopRecieveMessageThread; inline;
-    function RecieveMessageThreadRunning: Boolean; inline;
-    function InRecieveMessageThread: Boolean; inline;
+    function ReceiveMessage: TWebsocketMessage;
+    procedure StartReceiveMessageThread;
+    procedure StopReceiveMessageThread; inline;
+    function ReceiveMessageThreadRunning: Boolean; inline;
+    function InReceiveMessageThread: Boolean; inline;
     function HasMessages: Boolean;
     function GetUnprocessedMessages(const MsgList: TWebsocketMessageOwnerList): integer;
     function WaitForMessage(MessageTypes: TWebsocketMessageTypes=[wmtString, wmtBinary, wmtPong]
@@ -127,16 +127,16 @@ type
     procedure WriteStringMessage(const AMessage: String); inline;
     procedure WriteBinaryMessage(const AMessage: TBytes); inline;
 
-    property OnRecieveMessage: TNotifyEvent read GetOnRecieveMessage
-      write SetOnRecieveMessage;
+    property OnReceiveMessage: TNotifyEvent read GetOnReceiveMessage
+      write SetOnReceiveMessage;
     property OnClose: TNotifyEvent read GetOnClose write SetOnClose;
     property SocketStream: TLockedSocketStream read FStream;
     property Open: boolean read GetOpen;
   end;
 
-  { TRecieveMessageThread }
+  { TReceiveMessageThread }
 
-  TRecieveMessageThread = class(TThread)
+  TReceiveMessageThread = class(TThread)
   private
     FCommunicator: TWebsocketCommunincator;
   protected
@@ -220,23 +220,23 @@ begin
   Result := wordRec.Value;
 end;
 
-{ TRecieveMessageThread }
+{ TReceiveMessageThread }
 
-procedure TRecieveMessageThread.Execute;
+procedure TReceiveMessageThread.Execute;
 var
   msg: TWebsocketMessage;
 begin
   while not Terminated and FCommunicator.Open do
   begin
-    msg := FCommunicator.RecieveMessage;
+    msg := FCommunicator.ReceiveMessage;
     if Assigned(msg) then
       FCommunicator.AddMessageToList(msg);
     sleep(10);
   end;
-  FCommunicator.FRecieveMessageThread := nil;
+  FCommunicator.FReceiveMessageThread := nil;
 end;
 
-constructor TRecieveMessageThread.Create(Communicator: TWebsocketCommunincator);
+constructor TReceiveMessageThread.Create(Communicator: TWebsocketCommunincator);
 begin
   inherited Create(True);
   FCommunicator := Communicator;
@@ -333,12 +333,12 @@ begin
   end;
 end;
 
-function TWebsocketCommunincator.GetOnRecieveMessage: TNotifyEvent;
+function TWebsocketCommunincator.GetOnReceiveMessage: TNotifyEvent;
 begin
   try
-    Result := FOnRecieveMessage.Lock^;
+    Result := FOnReceiveMessage.Lock^;
   finally
-    FOnRecieveMessage.Unlock;
+    FOnReceiveMessage.Unlock;
   end;
 end;
 
@@ -351,19 +351,19 @@ begin
   end;
 end;
 
-procedure TWebsocketCommunincator.SetOnRecieveMessage(AValue: TNotifyEvent);
+procedure TWebsocketCommunincator.SetOnReceiveMessage(AValue: TNotifyEvent);
 begin
   try
-    FOnRecieveMessage.Lock^ := AValue;
+    FOnReceiveMessage.Lock^ := AValue;
   finally
-    FOnRecieveMessage.Unlock;
+    FOnReceiveMessage.Unlock;
   end;
 end;
 
 procedure TWebsocketCommunincator.AddMessageToList(Message: TWebsocketMessage);
 var
   lst: TWebsocketMessageList;
-  OnRecieveMessageEvent: TNotifyEvent;
+  OnReceiveMessageEvent: TNotifyEvent;
 begin
   if Assigned(Message) then
   begin
@@ -373,10 +373,10 @@ begin
     finally
       FMessages.Unlock;
     end;
-    OnRecieveMessageEvent := OnRecieveMessage;
-    if Assigned(OnRecieveMessageEvent) then
+    OnReceiveMessageEvent := OnReceiveMessage;
+    if Assigned(OnReceiveMessageEvent) then
     begin
-      OnRecieveMessageEvent(Self);
+      OnReceiveMessageEvent(Self);
     end;
   end;
 end;
@@ -388,7 +388,7 @@ begin
   FMaskMessages := AMaskMessage;
   FAssumeMaskedMessages := AssumeMaskedMessages;
   FMessages := TLockedWebsocketMessageList.Create(TWebsocketMessageList.Create);
-  FOnRecieveMessage.Init(nil);
+  FOnReceiveMessage.Init(nil);
   FOnClose.Init(nil);
   FExpectClose := False;
 end;
@@ -399,7 +399,7 @@ begin
   Close(True);
   FStream.Free;
   FMessages.Free;
-  FOnRecieveMessage.Done;
+  FOnReceiveMessage.Done;
   FOnClose.Done;
   inherited Destroy;
 end;
@@ -422,7 +422,7 @@ begin
   FStream.CloseStream;
 end;
 
-function TWebsocketCommunincator.RecieveMessage: TWebsocketMessage;
+function TWebsocketCommunincator.ReceiveMessage: TWebsocketMessage;
 
   procedure ReadData(var buffer; const len: int64);
   var
@@ -629,29 +629,29 @@ begin
   end;
 end;
 
-procedure TWebsocketCommunincator.StartRecieveMessageThread;
+procedure TWebsocketCommunincator.StartReceiveMessageThread;
 begin
-  if not Assigned(FRecieveMessageThread) then
+  if not Assigned(FReceiveMessageThread) then
   begin
-    FRecieveMessageThread := TRecieveMessageThread.Create(Self);
-    FRecieveMessageThread.Start;
+    FReceiveMessageThread := TReceiveMessageThread.Create(Self);
+    FReceiveMessageThread.Start;
   end;
 end;
 
-procedure TWebsocketCommunincator.StopRecieveMessageThread;
+procedure TWebsocketCommunincator.StopReceiveMessageThread;
 begin
-  if Assigned(FRecieveMessageThread) then
-    FRecieveMessageThread.Terminate;
+  if Assigned(FReceiveMessageThread) then
+    FReceiveMessageThread.Terminate;
 end;
 
-function TWebsocketCommunincator.RecieveMessageThreadRunning: Boolean;
+function TWebsocketCommunincator.ReceiveMessageThreadRunning: Boolean;
 begin
-  Result := Assigned(FRecieveMessageThread);
+  Result := Assigned(FReceiveMessageThread);
 end;
 
-function TWebsocketCommunincator.InRecieveMessageThread: Boolean;
+function TWebsocketCommunincator.InReceiveMessageThread: Boolean;
 begin
-  Result := RecieveMessageThreadRunning and (TThread.CurrentThread.ThreadID = FRecieveMessageThread.ThreadID);
+  Result := ReceiveMessageThreadRunning and (TThread.CurrentThread.ThreadID = FReceiveMessageThread.ThreadID);
 end;
 
 function TWebsocketCommunincator.HasMessages: Boolean;
@@ -721,16 +721,16 @@ begin
     if not (MessageType in [wmtString, wmtBinary, wmtPong]) then
       raise EUnsupportedMessageTypeException.Create('Can only wait for String, Binary or Pong messages');
   Result := nil;
-  oldEvent := OnRecieveMessage;
-  OnRecieveMessage := nil;
+  oldEvent := OnReceiveMessage;
+  OnReceiveMessage := nil;
   try
     while Open and not Assigned(Result) do
     begin
-      if RecieveMessageThreadRunning then
+      if ReceiveMessageThreadRunning then
         Sleep(100) // wait for messages on different thread
       else
-      begin // else recieve message
-        msg := RecieveMessage;
+      begin // else receive message
+        msg := ReceiveMessage;
         if Assigned(msg) then
           AddMessageToList(msg);
       end;
@@ -751,11 +751,11 @@ begin
       end;
     end;
   finally
-    OnRecieveMessage := oldEvent; 
-    // if other messages where recieved, call the event
-    // note there is a slim chance that between these lines, a message was recieved,
+    OnReceiveMessage := oldEvent; 
+    // if other messages where received, call the event
+    // note there is a slim chance that between these lines, a message was received,
     // so the event will be fired twice. But handling this with critical sections
-    // may introduce deadlocks when trying to recieve messages within the handler
+    // may introduce deadlocks when trying to receive messages within the handler
     // so it seems more reasonable to have the user ignore empty events
     if HasMessages and Assigned(oldEvent) then
       oldEvent(Self);

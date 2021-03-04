@@ -22,7 +22,7 @@ type
     procedure BroadcastMessage(message: String);
   private
     procedure ConnectionClosed(Sender: TObject);
-    procedure MessageRecieved(Sender: TObject);
+    procedure MessageReceived(Sender: TObject);
   end;
 
   { TCLIThread }
@@ -45,7 +45,7 @@ var
     ACommunication: TWebsocketCommunincator);
   begin
     BroadcastMessage(ACommunication.SocketStream.RemoteAddress.Address + ' joined the broadcast');
-    ACommunication.OnRecieveMessage := @MessageRecieved;
+    ACommunication.OnReceiveMessage := @MessageReceived;
     ACommunication.OnClose := @ConnectionClosed;
     // Just keep the communication open
     while ACommunication.Open do
@@ -74,7 +74,7 @@ var
     BroadcastMessage(Comm.SocketStream.RemoteAddress.Address + ' left the broadcast');
   end;
 
-  procedure TSocketHandler.MessageRecieved(Sender: TObject);
+  procedure TSocketHandler.MessageReceived(Sender: TObject);
   var
     Messages: TWebsocketMessageOwnerList;
     m: TWebsocketMessage;

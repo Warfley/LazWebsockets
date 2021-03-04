@@ -17,7 +17,7 @@ type
   TSocketHandler = class(TThreadedWebsocketHandler)
   private
     procedure ConnectionClosed(Sender: TObject);
-    procedure MessageRecieved(Sender: TObject);
+    procedure MessageReceived(Sender: TObject);
   public
     function Accept(const ARequest: TRequestData;
       const ResponseHeaders: TStrings): boolean; override;
@@ -42,7 +42,7 @@ var
     str: string;
   begin
     WriteLn('Connected to ', ACommunication.SocketStream.RemoteAddress.Address);
-    ACommunication.OnRecieveMessage := @MessageRecieved;
+    ACommunication.OnReceiveMessage := @MessageReceived;
     ACommunication.OnClose := @ConnectionClosed;
     ACommunication.WriteStringMessage('Bye bye');
   end;
@@ -55,7 +55,7 @@ var
     WriteLn('Connection to ', Comm.SocketStream.RemoteAddress.Address, ' closed');
   end;
 
-  procedure TSocketHandler.MessageRecieved(Sender: TObject);
+  procedure TSocketHandler.MessageReceived(Sender: TObject);
   var
     Messages: TWebsocketMessageOwnerList;
     m: TWebsocketMessage;

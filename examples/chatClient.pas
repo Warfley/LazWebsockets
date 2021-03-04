@@ -20,7 +20,7 @@ type
   TSimpleChat = class
   private
     FCommunicator: TWebsocketCommunincator;
-    procedure RecieveMessage(Sender: TObject);
+    procedure ReceiveMessage(Sender: TObject);
     procedure StreamClosed(Sender: TObject);
   public            
     procedure Execute;
@@ -35,7 +35,7 @@ begin
   WriteLn('Connection to ', FCommunicator.SocketStream.RemoteAddress.Address, ' closed');
 end;
 
-procedure TSimpleChat.RecieveMessage(Sender: TObject);
+procedure TSimpleChat.ReceiveMessage(Sender: TObject);
 var
   MsgList: TWebsocketMessageOwnerList;
   m: TWebsocketMessage;
@@ -84,14 +84,14 @@ constructor TSimpleChat.Create(ACommunicator: TWebsocketCommunincator);
 begin
   FCommunicator := ACommunicator;
   FCommunicator.OnClose:=@StreamClosed;
-  FCommunicator.OnRecieveMessage:=@RecieveMessage;
-  FCommunicator.StartRecieveMessageThread;
+  FCommunicator.OnReceiveMessage:=@ReceiveMessage;
+  FCommunicator.StartReceiveMessageThread;
 end;
 
 destructor TSimpleChat.Destroy;
 begin
-  FCommunicator.StopRecieveMessageThread;
-  while FCommunicator.RecieveMessageThreadRunning do
+  FCommunicator.StopReceiveMessageThread;
+  while FCommunicator.ReceiveMessageThreadRunning do
     Sleep(10);
   FCommunicator.Free;
   inherited Destroy;
