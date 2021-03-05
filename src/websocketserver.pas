@@ -250,8 +250,9 @@ var
   Recv: TWebsocketReceiverThread;
 begin
   try
-  Recv := CreateReceiverThread(arg.Communicator, Arg.Pooling);
+    Recv := CreateReceiverThread(arg.Communicator, Arg.Pooling);
     try
+      Arg.Communicator.SetCustomReceiveMessageThread(Recv);
       Arg.Handler.PrepareCommunication(arg.Communicator);
       Arg.Handler.DoHandleCommunication(arg.Communicator);
     finally
@@ -283,6 +284,7 @@ begin
       Arg.AddMessageToList(msg);
     Sleep(10);
   end;
+  Arg.SetCustomReceiveMessageThread(Nil);
 end;
 
 { THostHandler }

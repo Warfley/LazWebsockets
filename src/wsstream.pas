@@ -94,6 +94,7 @@ type
     FOnClose: TLockedEvent;
     FExpectClose: boolean;
     FReceiveMessageThread: TThread;
+    FCustomReceiveMessageThread: Boolean;
     function GetOnClose: TNotifyEvent;
     function GetOnReceiveMessage: TNotifyEvent;
     function GetOpen: boolean;
@@ -108,6 +109,7 @@ type
     procedure Close(ForceClose: boolean = False);
 
     function ReceiveMessage: TWebsocketMessage;
+    function SetCustomReceiveMessageThread(CustomReceiveMessageThread: TThread): Boolean; inline;
     procedure StartReceiveMessageThread;
     procedure StopReceiveMessageThread; inline;
     function ReceiveMessageThreadRunning: Boolean; inline;
@@ -629,10 +631,20 @@ begin
   end;
 end;
 
+function TWebsocketCommunincator.SetCustomReceiveMessageThread(
+  CustomReceiveMessageThread: TThread): Boolean;
+begin
+  Result := not (Assigned(FReceiveMessageThread) and Assigned(CustomReceiveMessageThread));
+  FCustomReceiveMessageThread := True;
+  if Result then
+    FReceiveMessageThread := CustomReceiveMessageThread;
+end;
+
 procedure TWebsocketCommunincator.StartReceiveMessageThread;
 begin
   if not Assigned(FReceiveMessageThread) then
   begin
+    FCustomReceiveMessageThread := False;;
     FReceiveMessageThread := TReceiveMessageThread.Create(Self);
     FReceiveMessageThread.Start;
   end;
@@ -641,7 +653,11 @@ end;
 procedure TWebsocketCommunincator.StopReceiveMessageThread;
 begin
   if Assigned(FReceiveMessageThread) then
+  begin
+    if FCustomReceiveMessageThread then
+      raise EInvalidOperation.Create('Can''t stop a custom receive message thread. Stop it yourself!');
     FReceiveMessageThread.Terminate;
+  end;
 end;
 
 function TWebsocketCommunincator.ReceiveMessageThreadRunning: Boolean;
