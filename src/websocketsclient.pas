@@ -61,6 +61,17 @@ begin
 end;
 
 function TWebsocketClient.DoHandshake(ASocket: TInetSocket): Boolean;
+
+function B64Trim(const B64String: String): String; inline;
+var
+  len: SizeInt;
+begin
+  len := Length(B64String);
+  while (len > 0) and (B64String[len] = '=') do
+    Dec(len);
+  Result := B64String.Substring(0, len);
+end;
+
 var
   Key, proto, StatusCodeStr, HeaderStr, ExpectedResponseKey: String;
   RequestContent: TStringList;
@@ -111,8 +122,8 @@ begin
       and ResponseData.Headers.TryGetData('Connection', conn)
       and ResponseData.Headers.TryGetData('Upgrade', upg)
       and ResponseData.Headers.TryGetData('Sec-WebSocket-Accept', respKey)
-      and (conn = 'Upgrade') and (upg = 'websocket')
-      and (respKey = ExpectedResponseKey)) then
+      and (conn.ToLower = 'upgrade') and (upg = 'websocket')
+      and (B64Trim(respKey) = B64Trim(ExpectedResponseKey))) then
     begin
       // Read content if possible
       if (ResponseData.StatusCode > 199)
