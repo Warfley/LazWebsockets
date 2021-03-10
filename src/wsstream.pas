@@ -461,7 +461,7 @@ function TWebsocketCommunincator.ReceiveMessage: TWebsocketMessage;
           if Read < 0 then
           begin
             // on Error
-            if Stream.LastError <> IOTimeoutError then
+            if (Stream.LastError <> IOTimeoutError) and (Stream.LastError <> 0) then
               raise EWebsocketReadError.Create('error reading from stream',
                 Stream.LastError);
           end
