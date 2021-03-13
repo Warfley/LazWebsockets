@@ -616,6 +616,8 @@ end;
 destructor TWebSocketServer.Destroy;
 begin
   Stop(True);
+  // Wait a bit for stop to take effect
+  Sleep(100);
   FSocket.Free;
   FHostMap.Free;
   inherited Destroy;
