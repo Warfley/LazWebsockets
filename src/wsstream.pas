@@ -54,13 +54,13 @@ type
     property LocalAddress: TNetAddress read FLocalAddress;
   end;
 
-  TWebsocketCommunincator = class;
+  TWebsocketCommunicator = class;
 
   { TWebsocketMessageStream }
 
   TWebsocketMessageStream = class(TStream)
   private
-    FCommunicator: TWebsocketCommunincator;
+    FCommunicator: TWebsocketCommunicator;
     FMaxFrameSize: int64;
     FMessageType: TWebsocketMessageType;
     FBuffer: TBytes;
@@ -71,7 +71,7 @@ type
     function GenerateMask: Cardinal;
     procedure WriteDataFrame(Finished: boolean = False);
   public
-    constructor Create(const ACommunicator: TWebsocketCommunincator;
+    constructor Create(const ACommunicator: TWebsocketCommunicator;
       AMessageType: TWebsocketMessageType; AMaxFrameLen: int64;
   ADoMask: Boolean);
     destructor Destroy; override;
@@ -82,9 +82,9 @@ type
 
   TLockedEvent = specialize TThreadedData<TNotifyEvent>;
 
-  { TWebsocketCommunincator }
+  { TWebsocketCommunicator }
 
-  TWebsocketCommunincator = class
+  TWebsocketCommunicator = class
   private
     FStream: TLockedSocketStream;
     FMessages: TLockedWebsocketMessageList;
@@ -140,11 +140,11 @@ type
 
   TReceiveMessageThread = class(TThread)
   private
-    FCommunicator: TWebsocketCommunincator;
+    FCommunicator: TWebsocketCommunicator;
   protected
     procedure Execute; override;
   public
-    constructor Create(Communicator: TWebsocketCommunincator);
+    constructor Create(Communicator: TWebsocketCommunicator);
   end;
   
 function GenerateAcceptingKey(const Key: string): string; inline;
@@ -238,7 +238,7 @@ begin
   FCommunicator.FReceiveMessageThread := nil;
 end;
 
-constructor TReceiveMessageThread.Create(Communicator: TWebsocketCommunincator);
+constructor TReceiveMessageThread.Create(Communicator: TWebsocketCommunicator);
 begin
   inherited Create(True);
   FCommunicator := Communicator;
@@ -319,14 +319,14 @@ begin
   end;
 end;
 
-{ TWebsocketCommunincator }
+{ TWebsocketCommunicator }
 
-function TWebsocketCommunincator.GetOpen: boolean;
+function TWebsocketCommunicator.GetOpen: boolean;
 begin
   Result := FStream.Open;
 end;
 
-function TWebsocketCommunincator.GetOnClose: TNotifyEvent;
+function TWebsocketCommunicator.GetOnClose: TNotifyEvent;
 begin
   try
     Result := FOnClose.Lock^;
@@ -335,7 +335,7 @@ begin
   end;
 end;
 
-function TWebsocketCommunincator.GetOnReceiveMessage: TNotifyEvent;
+function TWebsocketCommunicator.GetOnReceiveMessage: TNotifyEvent;
 begin
   try
     Result := FOnReceiveMessage.Lock^;
@@ -344,7 +344,7 @@ begin
   end;
 end;
 
-procedure TWebsocketCommunincator.SetOnClose(AValue: TNotifyEvent);
+procedure TWebsocketCommunicator.SetOnClose(AValue: TNotifyEvent);
 begin
   try
     FOnClose.Lock^ := AValue;
@@ -353,7 +353,7 @@ begin
   end;
 end;
 
-procedure TWebsocketCommunincator.SetOnReceiveMessage(AValue: TNotifyEvent);
+procedure TWebsocketCommunicator.SetOnReceiveMessage(AValue: TNotifyEvent);
 begin
   try
     FOnReceiveMessage.Lock^ := AValue;
@@ -362,7 +362,7 @@ begin
   end;
 end;
 
-procedure TWebsocketCommunincator.AddMessageToList(Message: TWebsocketMessage);
+procedure TWebsocketCommunicator.AddMessageToList(Message: TWebsocketMessage);
 var
   lst: TWebsocketMessageList;
   OnReceiveMessageEvent: TNotifyEvent;
@@ -383,7 +383,7 @@ begin
   end;
 end;
 
-constructor TWebsocketCommunincator.Create(AStream: TLockedSocketStream;
+constructor TWebsocketCommunicator.Create(AStream: TLockedSocketStream;
   AMaskMessage: boolean; AssumeMaskedMessages: boolean);
 begin
   FStream := AStream;
@@ -395,7 +395,7 @@ begin
   FExpectClose := False;
 end;
 
-destructor TWebsocketCommunincator.Destroy;
+destructor TWebsocketCommunicator.Destroy;
 begin
   // Ending communication => Close stream
   Close(True);
@@ -406,7 +406,7 @@ begin
   inherited Destroy;
 end;
 
-procedure TWebsocketCommunincator.Close(ForceClose: boolean);
+procedure TWebsocketCommunicator.Close(ForceClose: boolean);
 var
   OnCloseEvent: TNotifyEvent;
 begin
@@ -424,7 +424,7 @@ begin
   FStream.CloseStream;
 end;
 
-function TWebsocketCommunincator.ReceiveMessage: TWebsocketMessage;
+function TWebsocketCommunicator.ReceiveMessage: TWebsocketMessage;
 
   procedure ReadData(var buffer; const len: int64);
   var
@@ -631,7 +631,7 @@ begin
   end;
 end;
 
-function TWebsocketCommunincator.SetCustomReceiveMessageThread(
+function TWebsocketCommunicator.SetCustomReceiveMessageThread(
   CustomReceiveMessageThread: TThread): Boolean;
 begin
   Result := not (Assigned(FReceiveMessageThread) and Assigned(CustomReceiveMessageThread));
@@ -640,7 +640,7 @@ begin
     FReceiveMessageThread := CustomReceiveMessageThread;
 end;
 
-procedure TWebsocketCommunincator.StartReceiveMessageThread;
+procedure TWebsocketCommunicator.StartReceiveMessageThread;
 begin
   if not Assigned(FReceiveMessageThread) then
   begin
@@ -650,7 +650,7 @@ begin
   end;
 end;
 
-procedure TWebsocketCommunincator.StopReceiveMessageThread;
+procedure TWebsocketCommunicator.StopReceiveMessageThread;
 begin
   if Assigned(FReceiveMessageThread) then
   begin
@@ -660,17 +660,17 @@ begin
   end;
 end;
 
-function TWebsocketCommunincator.ReceiveMessageThreadRunning: Boolean;
+function TWebsocketCommunicator.ReceiveMessageThreadRunning: Boolean;
 begin
   Result := Assigned(FReceiveMessageThread);
 end;
 
-function TWebsocketCommunincator.InReceiveMessageThread: Boolean;
+function TWebsocketCommunicator.InReceiveMessageThread: Boolean;
 begin
   Result := ReceiveMessageThreadRunning and (TThread.CurrentThread.ThreadID = FReceiveMessageThread.ThreadID);
 end;
 
-function TWebsocketCommunincator.HasMessages: Boolean;
+function TWebsocketCommunicator.HasMessages: Boolean;
 begin
   try
     Result := FMessages.Lock.Count > 0;
@@ -679,14 +679,14 @@ begin
   end;
 end;
 
-function TWebsocketCommunincator.WriteMessage(MessageType: TWebsocketMessageType;
+function TWebsocketCommunicator.WriteMessage(MessageType: TWebsocketMessageType;
   MaxFrameLength: int64): TWebsocketMessageStream;
 begin
   Result := TWebsocketMessageStream.Create(Self, MessageType,
     MaxFrameLength, FMaskMessages);
 end;
 
-procedure TWebsocketCommunincator.WriteRawMessage(const AMessage;
+procedure TWebsocketCommunicator.WriteRawMessage(const AMessage;
   ALength: SizeInt; AMessageType: TWebsocketMessageType);
 begin
   with WriteMessage(AMessageType, ALength) do
@@ -697,17 +697,17 @@ begin
   end;
 end;
 
-procedure TWebsocketCommunincator.WriteStringMessage(const AMessage: String);
+procedure TWebsocketCommunicator.WriteStringMessage(const AMessage: String);
 begin
   WriteRawMessage(AMessage[1], AMessage.Length);
 end;
 
-procedure TWebsocketCommunincator.WriteBinaryMessage(const AMessage: TBytes);
+procedure TWebsocketCommunicator.WriteBinaryMessage(const AMessage: TBytes);
 begin
   WriteRawMessage(AMessage[0], Length(AMessage), wmtBinary);
 end;
 
-function TWebsocketCommunincator.GetUnprocessedMessages(
+function TWebsocketCommunicator.GetUnprocessedMessages(
   const MsgList: TWebsocketMessageOwnerList): integer;
 var
   lst: TWebsocketMessageList;
@@ -724,7 +724,7 @@ begin
   end;
 end;
 
-function TWebsocketCommunincator.WaitForMessage(
+function TWebsocketCommunicator.WaitForMessage(
   MessageTypes: TWebsocketMessageTypes): TWebsocketMessage;
 var
   oldEvent: TNotifyEvent;
@@ -778,17 +778,17 @@ begin
   end;
 end;
 
-function TWebsocketCommunincator.WaitForStringMessage: TWebsocketStringMessage;
+function TWebsocketCommunicator.WaitForStringMessage: TWebsocketStringMessage;
 begin
   Result := WaitForMessage([wmtString]) as TWebsocketStringMessage;
 end;
 
-function TWebsocketCommunincator.WaitForBinaryMessage: TWebsocketBinaryMessage;
+function TWebsocketCommunicator.WaitForBinaryMessage: TWebsocketBinaryMessage;
 begin
   Result := WaitForMessage([wmtBinary]) as TWebsocketBinaryMessage;
 end;
 
-function TWebsocketCommunincator.WaitForPongMessage: TWebsocketPongMessage;
+function TWebsocketCommunicator.WaitForPongMessage: TWebsocketPongMessage;
 begin
   Result := WaitForMessage([wmtPong]) as TWebsocketPongMessage;
 end;
@@ -881,7 +881,7 @@ begin
 end;
 
 constructor TWebsocketMessageStream.Create(
-  const ACommunicator: TWebsocketCommunincator;
+  const ACommunicator: TWebsocketCommunicator;
   AMessageType: TWebsocketMessageType; AMaxFrameLen: int64; ADoMask: Boolean);
 begin
   FCommunicator := ACommunicator;

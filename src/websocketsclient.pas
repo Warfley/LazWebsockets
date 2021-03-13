@@ -37,7 +37,7 @@ type
     constructor Create(const AHost: String; const APort: Integer = 80; const APath: String = '/');
     destructor Destroy; override;
 
-    function Connect(AHandler: TSocketHandler = nil): TWebsocketCommunincator;
+    function Connect(AHandler: TSocketHandler = nil): TWebsocketCommunicator;
 
     property Host: String read FHost write FHost;
     property Port: Integer read FPort write FPort;
@@ -168,7 +168,7 @@ begin
   inherited Destroy;
 end;
 
-function TWebsocketClient.Connect(AHandler: TSocketHandler): TWebsocketCommunincator;
+function TWebsocketClient.Connect(AHandler: TSocketHandler): TWebsocketCommunicator;
 var
   Socket: TInetSocket;
 begin      
@@ -184,7 +184,7 @@ begin
     Socket.Free;
     raise;
   end;
-  Result := TWebsocketCommunincator.Create(TLockedSocketStream.Create(Socket), True, False);
+  Result := TWebsocketCommunicator.Create(TLockedSocketStream.Create(Socket), True, False);
 end;
 
 initialization

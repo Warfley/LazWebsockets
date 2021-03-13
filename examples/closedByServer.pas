@@ -21,7 +21,7 @@ type
   public
     function Accept(const ARequest: TRequestData;
       const ResponseHeaders: TStrings): boolean; override;
-    procedure DoHandleCommunication(ACommunication: TWebsocketCommunincator);
+    procedure DoHandleCommunication(ACommunication: TWebsocketCommunicator);
       override;
   end;
 
@@ -37,7 +37,7 @@ var
   end;
 
   procedure TSocketHandler.DoHandleCommunication(
-    ACommunication: TWebsocketCommunincator);
+    ACommunication: TWebsocketCommunicator);
   var
     str: string;
   begin
@@ -49,9 +49,9 @@ var
 
   procedure TSocketHandler.ConnectionClosed(Sender: TObject);
   var
-    Comm: TWebsocketCommunincator;
+    Comm: TWebsocketCommunicator;
   begin
-    Comm := TWebsocketCommunincator(Sender);
+    Comm := TWebsocketCommunicator(Sender);
     WriteLn('Connection to ', Comm.SocketStream.RemoteAddress.Address, ' closed');
   end;
 
@@ -59,9 +59,9 @@ var
   var
     Messages: TWebsocketMessageOwnerList;
     m: TWebsocketMessage;
-    Comm: TWebsocketCommunincator;
+    Comm: TWebsocketCommunicator;
   begin
-    Comm := TWebsocketCommunincator(Sender);
+    Comm := TWebsocketCommunicator(Sender);
     Messages := TWebsocketMessageOwnerList.Create(True);
     try
       Comm.GetUnprocessedMessages(Messages);

@@ -17,7 +17,7 @@ type
 
   TSocketHandler = class(TThreadedWebsocketHandler)
   public
-    procedure DoHandleCommunication(ACommunication: TWebsocketCommunincator);
+    procedure DoHandleCommunication(ACommunication: TWebsocketCommunicator);
       override;
     procedure BroadcastMessage(message: String);
   private
@@ -42,7 +42,7 @@ var
 
 
   procedure TSocketHandler.DoHandleCommunication(
-    ACommunication: TWebsocketCommunincator);
+    ACommunication: TWebsocketCommunicator);
   begin
     BroadcastMessage(ACommunication.SocketStream.RemoteAddress.Address + ' joined the broadcast');
     ACommunication.OnReceiveMessage := @MessageReceived;
@@ -55,7 +55,7 @@ var
   procedure TSocketHandler.BroadcastMessage(message: String);
   var
     ConnectionList: TConnectionList;
-    Connection: TWebsocketCommunincator;
+    Connection: TWebsocketCommunicator;
   begin
     ConnectionList := Connections.Lock;
     try
@@ -68,9 +68,9 @@ var
 
   procedure TSocketHandler.ConnectionClosed(Sender: TObject);
   var
-    Comm: TWebsocketCommunincator;
+    Comm: TWebsocketCommunicator;
   begin
-    Comm := TWebsocketCommunincator(Sender);
+    Comm := TWebsocketCommunicator(Sender);
     BroadcastMessage(Comm.SocketStream.RemoteAddress.Address + ' left the broadcast');
   end;
 
@@ -78,9 +78,9 @@ var
   var
     Messages: TWebsocketMessageOwnerList;
     m: TWebsocketMessage;
-    Comm: TWebsocketCommunincator;
+    Comm: TWebsocketCommunicator;
   begin
-    Comm := TWebsocketCommunincator(Sender);
+    Comm := TWebsocketCommunicator(Sender);
     Messages := TWebsocketMessageOwnerList.Create(True);
     try
       Comm.GetUnprocessedMessages(Messages);

@@ -19,12 +19,12 @@ type
 
   TSimpleChat = class
   private
-    FCommunicator: TWebsocketCommunincator;
+    FCommunicator: TWebsocketCommunicator;
     procedure ReceiveMessage(Sender: TObject);
     procedure StreamClosed(Sender: TObject);
   public            
     procedure Execute;
-    constructor Create(ACommunicator: TWebsocketCommunincator);
+    constructor Create(ACommunicator: TWebsocketCommunicator);
     destructor Destroy; override;
   end;
 
@@ -80,7 +80,7 @@ begin
   end;
 end;
 
-constructor TSimpleChat.Create(ACommunicator: TWebsocketCommunincator);
+constructor TSimpleChat.Create(ACommunicator: TWebsocketCommunicator);
 begin
   FCommunicator := ACommunicator;
   FCommunicator.OnClose:=@StreamClosed;

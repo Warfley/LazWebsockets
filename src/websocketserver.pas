@@ -16,7 +16,7 @@ type
     Headers: THttpHeader;
   end;
 
-  TConnectionList = class(specialize TFPGObjectList<TWebsocketCommunincator>);
+  TConnectionList = class(specialize TFPGObjectList<TWebsocketCommunicator>);
   TThreadedConnectionList = class(specialize TThreadedObject<TConnectionList>);
 
   { TWebsocketHandler }
@@ -30,10 +30,10 @@ type
 
     function Accept(const ARequest: TRequestData;
       const ResponseHeaders: TStrings): boolean; virtual;
-    procedure HandleCommunication(ACommunicator: TWebsocketCommunincator); virtual;
-    procedure PrepareCommunication(ACommunicator: TWebsocketCommunincator); virtual;
-    procedure DoHandleCommunication(ACommunicator: TWebsocketCommunincator); virtual;
-    procedure FinalizeCommunication(ACommunicator: TWebsocketCommunincator); virtual;
+    procedure HandleCommunication(ACommunicator: TWebsocketCommunicator); virtual;
+    procedure PrepareCommunication(ACommunicator: TWebsocketCommunicator); virtual;
+    procedure DoHandleCommunication(ACommunicator: TWebsocketCommunicator); virtual;
+    procedure FinalizeCommunication(ACommunicator: TWebsocketCommunicator); virtual;
 
     property Connections: TThreadedConnectionList read FConnections;
   end;
@@ -45,7 +45,7 @@ type
     FPooling: Boolean;
   public
     constructor Create(Pooling: Boolean = True);
-    procedure HandleCommunication(ACommunicator: TWebsocketCommunincator); override;
+    procedure HandleCommunication(ACommunicator: TWebsocketCommunicator); override;
   end;
 
   { THostHandler }
@@ -116,7 +116,7 @@ implementation
 
 type
   TWebsocketHandlerArgs = record
-    Communicator: TWebsocketCommunincator;
+    Communicator: TWebsocketCommunicator;
     Handler: TThreadedWebsocketHandler;
     Pooling: Boolean;
   end;
@@ -134,9 +134,9 @@ type
 
   { TWebsocketReceiverThread }
 
-  TWebsocketReceiverThread = class(specialize TPoolableThread<TWebsocketCommunincator>)
+  TWebsocketReceiverThread = class(specialize TPoolableThread<TWebsocketCommunicator>)
   protected
-    procedure ExecuteTask(constref Arg: TWebsocketCommunincator); override;
+    procedure ExecuteTask(constref Arg: TWebsocketCommunicator); override;
   end;
 
   TReceiverThreadPool = specialize TThreadPool<TWebsocketReceiverThread>;
@@ -192,7 +192,7 @@ begin
   end;
 end;
 
-function CreateHandlerThread(const ACommunicator: TWebsocketCommunincator;
+function CreateHandlerThread(const ACommunicator: TWebsocketCommunicator;
   const AHandler: TThreadedWebsocketHandler; Pooling: Boolean): TWebsocketHandlerThread; inline;
 var
   pool: THandlerThreadPool;
@@ -219,7 +219,7 @@ begin
   end;
 end;
 
-function CreateReceiverThread(const ACommunicator: TWebsocketCommunincator; Pooling: Boolean):
+function CreateReceiverThread(const ACommunicator: TWebsocketCommunicator; Pooling: Boolean):
 TWebsocketReceiverThread; inline;
 var
   pool: TReceiverThreadPool;
@@ -273,7 +273,7 @@ end;
 { TWebsocketReceiverThread }
 
 procedure TWebsocketReceiverThread.ExecuteTask(constref
-  Arg: TWebsocketCommunincator);
+  Arg: TWebsocketCommunicator);
 var
   msg: TWebsocketMessage;
 begin
@@ -305,7 +305,7 @@ end;
 destructor TWebsocketHandler.Destroy;
 var
   ConnectionList: TConnectionList;
-  Connection: TWebsocketCommunincator;
+  Connection: TWebsocketCommunicator;
 begin
   ConnectionList := FConnections.Lock;
   try
@@ -327,7 +327,7 @@ begin
 end;
 
 procedure TWebsocketHandler.PrepareCommunication(
-  ACommunicator: TWebsocketCommunincator);
+  ACommunicator: TWebsocketCommunicator);
 var
   lst: TConnectionList;
 begin
@@ -340,13 +340,13 @@ begin
 end;
 
 procedure TWebsocketHandler.DoHandleCommunication(
-  ACommunicator: TWebsocketCommunincator);
+  ACommunicator: TWebsocketCommunicator);
 begin
   // No implementation; To be overriden
 end;
 
 procedure TWebsocketHandler.FinalizeCommunication(
-  ACommunicator: TWebsocketCommunincator);
+  ACommunicator: TWebsocketCommunicator);
 var
   lst: TConnectionList;
 begin
@@ -361,7 +361,7 @@ begin
 end;
 
 procedure TWebsocketHandler.HandleCommunication(
-  ACommunicator: TWebsocketCommunincator);
+  ACommunicator: TWebsocketCommunicator);
 begin
   PrepareCommunication(ACommunicator);
   DoHandleCommunication(ACommunicator);
@@ -375,7 +375,7 @@ begin
 end;
 
 procedure TThreadedWebsocketHandler.HandleCommunication(
-  ACommunicator: TWebsocketCommunincator);
+  ACommunicator: TWebsocketCommunicator);
 begin
   CreateHandlerThread(ACommunicator, Self, FPooling);
 end;
@@ -464,7 +464,7 @@ var
   ResponseHeaders: TStringList;
   i: integer;
   HandsakeResponse: TStringList;
-  Comm: TWebsocketCommunincator;
+  Comm: TWebsocketCommunicator;
 begin
   try
     RequestData.Headers := THttpHeader.Create;
@@ -540,7 +540,7 @@ begin
     finally
       RequestData.Headers.Free;
     end;
-    Comm := TWebsocketCommunincator.Create(TLockedSocketStream.Create(FStream),
+    Comm := TWebsocketCommunicator.Create(TLockedSocketStream.Create(FStream),
       False, True);
   finally
     // Not needed anymore, we can now die in piece.
