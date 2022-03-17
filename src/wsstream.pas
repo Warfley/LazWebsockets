@@ -268,7 +268,7 @@ begin
   FLocalAddress.Address := NetAddrToStr(AStream.LocalAddress.sin_addr);
   FLocalAddress.Port := AStream.LocalAddress.sin_port;
   FRemoteAddress.Address := NetAddrToStr(AStream.RemoteAddress.sin_addr);
-  FRemoteAddress.Port := AStream.LocalAddress.sin_port;
+  FRemoteAddress.Port := AStream.RemoteAddress.sin_port;
   FStream := AStream;
   InitCriticalSection(FReadLock);
   InitCriticalSection(FWriteLock);

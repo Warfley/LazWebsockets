@@ -2,13 +2,14 @@
   This source is only used to compile and install the package.
  }
 
-unit Websockets;
+unit websockets;
 
 {$warn 5023 off : no warning about unused units}
 interface
 
 uses
-  WebSocketServer, wsutils, wsmessages, wsstream, LazarusPackageIntf;
+  WebsocketsClient, WebSocketServer, wsmessages, wsstream, wsutils, 
+  LazarusPackageIntf;
 
 implementation
 
@@ -17,5 +18,5 @@ begin
 end;
 
 initialization
-  RegisterPackage('Websockets', @Register);
+  RegisterPackage('websockets', @Register);
 end.

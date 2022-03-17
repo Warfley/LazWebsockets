@@ -44,7 +44,7 @@ var
   procedure TSocketHandler.DoHandleCommunication(
     ACommunication: TWebsocketCommunicator);
   begin
-    BroadcastMessage(ACommunication.SocketStream.RemoteAddress.Address + ' joined the broadcast');
+    BroadcastMessage(ACommunication.SocketStream.RemoteAddress.Address + ':' + ACommunication.SocketStream.RemoteAddress.Port.ToString + ' joined the broadcast');
     ACommunication.OnReceiveMessage := @MessageReceived;
     ACommunication.OnClose := @ConnectionClosed;
     // Just keep the communication open
@@ -57,6 +57,7 @@ var
     ConnectionList: TConnectionList;
     Connection: TWebsocketCommunicator;
   begin
+    WriteLn('Broadcasting: ', message);
     ConnectionList := Connections.Lock;
     try
       for Connection in ConnectionList do
