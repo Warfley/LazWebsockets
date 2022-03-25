@@ -106,7 +106,7 @@ type
       AssumeMaskedMessages: boolean);
     destructor Destroy; override;
 
-    procedure Close(ForceClose: boolean = False);
+    procedure Close(ForceClose: boolean = False); virtual;
 
     function ReceiveMessage: TWebsocketMessage;
     function SetCustomReceiveMessageThread(CustomReceiveMessageThread: TThread): Boolean; inline;

@@ -22,20 +22,15 @@ type
   { TWebsocketHandler }
 
   TWebsocketHandler = class
-  private
-    FConnections: TThreadedConnectionList;
-  public
-    constructor Create;
-    destructor Destroy; override;
-
-    function Accept(const ARequest: TRequestData;
-      const ResponseHeaders: TStrings): boolean; virtual;
-    procedure HandleCommunication(ACommunicator: TWebsocketCommunicator); virtual;
+  protected
     procedure PrepareCommunication(ACommunicator: TWebsocketCommunicator); virtual;
     procedure DoHandleCommunication(ACommunicator: TWebsocketCommunicator); virtual;
     procedure FinalizeCommunication(ACommunicator: TWebsocketCommunicator); virtual;
-
-    property Connections: TThreadedConnectionList read FConnections;
+  public
+    function Accept(const ARequest: TRequestData;
+      const ResponseHeaders: TStrings): boolean; virtual;
+    function CreateCommunicator(DataStream: TLockedSocketStream; AHeader: THttpHeader): TWebsocketCommunicator; virtual;
+    procedure HandleCommunication(ACommunicator: TWebsocketCommunicator); virtual;
   end;
 
   { TThreadedWebsocketHandler }
@@ -297,46 +292,12 @@ end;
 
 { TWebsocketHandler }
 
-constructor TWebsocketHandler.Create;
-begin
-  FConnections := TThreadedConnectionList.Create(TConnectionList.Create);
-end;
-
-destructor TWebsocketHandler.Destroy;
-var
-  ConnectionList: TConnectionList;
-  Connection: TWebsocketCommunicator;
-begin
-  ConnectionList := FConnections.Lock;
-  try
-    for Connection in ConnectionList do
-      Connection.Close(True);
-  finally
-    FConnections.Unlock;
-  end;
-  // wait for all connections to close
-  sleep(100);
-  FConnections.Free;
-  inherited Destroy;
-end;
-
-function TWebsocketHandler.Accept(const ARequest: TRequestData;
-  const ResponseHeaders: TStrings): boolean;
-begin
-  Result := True;
-end;
-
 procedure TWebsocketHandler.PrepareCommunication(
   ACommunicator: TWebsocketCommunicator);
 var
   lst: TConnectionList;
 begin
-  lst := FConnections.Lock;
-  try
-    lst.Add(ACommunicator);
-  finally
-    FConnections.Unlock;
-  end;
+  // No implementation; To be overriden
 end;
 
 procedure TWebsocketHandler.DoHandleCommunication(
@@ -347,17 +308,22 @@ end;
 
 procedure TWebsocketHandler.FinalizeCommunication(
   ACommunicator: TWebsocketCommunicator);
-var
-  lst: TConnectionList;
 begin
   ACommunicator.Close;
   Sleep(20);
-  lst := FConnections.Lock;
-  try
-    lst.Remove(ACommunicator);
-  finally
-    FConnections.Unlock;
-  end;
+  ACommunicator.Free;
+end;
+
+function TWebsocketHandler.Accept(const ARequest: TRequestData;
+  const ResponseHeaders: TStrings): boolean;
+begin
+  Result := True;
+end;
+
+function TWebsocketHandler.CreateCommunicator(DataStream: TLockedSocketStream;
+  AHeader: THttpHeader): TWebsocketCommunicator;
+begin
+  Result := TWebsocketCommunicator.Create(DataStream, False, True);
 end;
 
 procedure TWebsocketHandler.HandleCommunication(
@@ -441,7 +407,7 @@ begin
   if not (RequestData.Headers.TryGetData('Upgrade', upg) and
     RequestData.Headers.TryGetData('Connection', conn) and
     RequestData.Headers.TryGetData('Sec-WebSocket-Key', RequestData.Key) and
-    (upg = 'websocket') and (conn.Contains('Upgrade'))) then
+    (upg.ToLower = 'websocket') and (conn.ToLower.Contains('upgrade'))) then
   begin
     // Seems to be a normal HTTP request, we only handle websockets
     Exit;
@@ -453,7 +419,6 @@ begin
     RequestData.Host := '';
   Result := True;
 end;
-
 
 procedure TWebsocketHandshakeHandler.PerformHandshake;
 var
@@ -540,8 +505,7 @@ begin
     finally
       RequestData.Headers.Free;
     end;
-    Comm := TWebsocketCommunicator.Create(TLockedSocketStream.Create(FStream),
-      False, True);
+    Comm := sh.CreateCommunicator(TLockedSocketStream.Create(FStream), RequestData.Headers);
   finally
     // Not needed anymore, we can now die in piece.
     // All information requier for the rest is now on the stack
