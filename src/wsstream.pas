@@ -166,7 +166,7 @@ begin
 {$endif}
 end;
 
-function ntohll(net: QWord): QWord; inline;
+function ntohll(net: int64): int64; inline;
 begin
 {$ifdef FPC_BIG_ENDIAN}
   Result := net;
