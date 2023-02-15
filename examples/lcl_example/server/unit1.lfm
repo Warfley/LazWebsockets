@@ -1,0 +1,122 @@
+object Form1: TForm1
+  Left = 878
+  Height = 538
+  Top = 250
+  Width = 810
+  Caption = 'Simple Chat Server'
+  ClientHeight = 538
+  ClientWidth = 810
+  DesignTimePPI = 144
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  object Panel1: TPanel
+    Left = 0
+    Height = 34
+    Top = 0
+    Width = 810
+    Align = alTop
+    BevelOuter = bvSpace
+    ClientHeight = 34
+    ClientWidth = 810
+    TabOrder = 0
+    object HostnameEdit: TEdit
+      Left = 1
+      Height = 32
+      Top = 1
+      Width = 576
+      Align = alClient
+      TabOrder = 0
+      Text = '0.0.0.0'
+    end
+    object PortEdit: TEdit
+      Left = 577
+      Height = 32
+      Top = 1
+      Width = 120
+      Align = alRight
+      TabOrder = 1
+      Text = '8080'
+    end
+    object StartStopButton: TButton
+      Left = 697
+      Height = 32
+      Top = 1
+      Width = 112
+      Align = alRight
+      Caption = 'Start'
+      OnClick = StartStopButtonClick
+      TabOrder = 2
+    end
+  end
+  object Panel2: TPanel
+    Left = 0
+    Height = 34
+    Top = 504
+    Width = 810
+    Align = alBottom
+    BevelOuter = bvSpace
+    ClientHeight = 34
+    ClientWidth = 810
+    TabOrder = 1
+    object MessageEdit: TEdit
+      Left = 251
+      Height = 32
+      Top = 1
+      Width = 446
+      Align = alClient
+      OnChange = MessageEditChange
+      TabOrder = 0
+    end
+    object SendButton: TButton
+      Left = 697
+      Height = 32
+      Top = 1
+      Width = 112
+      Align = alRight
+      Caption = 'Send'
+      Enabled = False
+      OnClick = SendButtonClick
+      TabOrder = 1
+    end
+    object TargetSelectorBox: TComboBox
+      Left = 1
+      Height = 33
+      Top = 1
+      Width = 250
+      Align = alLeft
+      ItemHeight = 25
+      ItemIndex = 0
+      Items.Strings = (
+        'All'
+      )
+      Style = csDropDownList
+      TabOrder = 2
+      Text = 'All'
+    end
+  end
+  object ClientsBox: TListBox
+    Left = 0
+    Height = 470
+    Top = 34
+    Width = 222
+    Align = alLeft
+    ItemHeight = 0
+    OnDblClick = ClientsBoxDblClick
+    TabOrder = 2
+  end
+  object MessagesMemo: TMemo
+    Left = 230
+    Height = 470
+    Top = 34
+    Width = 580
+    Align = alClient
+    ReadOnly = True
+    TabOrder = 3
+  end
+  object Splitter1: TSplitter
+    Left = 222
+    Height = 470
+    Top = 34
+    Width = 8
+  end
+end
